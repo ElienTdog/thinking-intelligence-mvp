@@ -59,29 +59,32 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   async function createQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await requestJson("/api/questions", { title: form.get("title"), initialJudgment: form.get("initialJudgment"), priority: form.get("priority") });
-      event.currentTarget.reset(); setShowQuestionForm(false); setNotice("问题已保存。下一步是放进一条会挑战它的材料。"); await load();
+      formElement.reset(); setShowQuestionForm(false); setNotice("问题已保存。下一步是放进一条会挑战它的材料。"); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
   async function createMaterial(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await requestJson("/api/materials", { questionId: selectedQuestionId, type: form.get("type"), title: form.get("title"), challenge: form.get("challenge"), relevance: form.get("relevance") });
-      event.currentTarget.reset(); setShowMaterialForm(false); setNotice("材料已保存。现在写一句回应，留下判断的变化。 "); await load();
+      formElement.reset(); setShowMaterialForm(false); setNotice("材料已保存。现在写一句回应，留下判断的变化。 "); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
   async function createDelta(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     if (!respondingTo) return;
     try {
       await requestJson("/api/judgment-deltas", { questionId: selectedQuestionId, materialId: respondingTo.id, responseType: form.get("responseType"), responseText: form.get("responseText"), validationScenario: form.get("validationScenario") });
-      event.currentTarget.reset(); setRespondingTo(null); setNotice("判断差分已保存；它不会自动改写你的临时立场。 "); await load();
+      formElement.reset(); setRespondingTo(null); setNotice("判断差分已保存；它不会自动改写你的临时立场。 "); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
