@@ -1,0 +1,22 @@
+# Personal Markdown vault: never publish it with the application source.
+/thinking/
+/thinking-intelligence-product-notes.md
+
+# Local dashboard exports and runtime state.
+*.html
+!README.md
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Web application dependencies and build output.
+/web/node_modules/
+/web/dist/
+/web/.next/
+/web/.vinext/
+/web/.wrangler/
+/web/coverage/
+/web/.env
+/web/.env.*
+!/web/.env.example
