@@ -7,6 +7,7 @@ export const RESPONSE_TYPES = Object.freeze([
 
 const MAX_SHORT_TEXT = 280;
 const MAX_LONG_TEXT = 2_000;
+const MAX_CAPTURE_TEXT = 8_000;
 
 export function cleanText(value, maxLength = MAX_LONG_TEXT) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -32,6 +33,22 @@ export function validateMaterialPayload(payload) {
     return { error: "questionId, type, title, challenge, and relevance are required" };
   }
   return { value: { questionId, type, title, challenge, relevance } };
+}
+
+export function validateClipPayload(payload) {
+  const content = cleanText(payload?.content, MAX_CAPTURE_TEXT);
+  const sourceTitle = cleanText(payload?.sourceTitle, MAX_SHORT_TEXT);
+  const sourceUrl = cleanText(payload?.sourceUrl, MAX_LONG_TEXT);
+  if (!content) return { error: "content is required" };
+  if (sourceUrl) {
+    try {
+      const url = new URL(sourceUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("unsupported protocol");
+    } catch {
+      return { error: "sourceUrl must be an http or https URL" };
+    }
+  }
+  return { value: { content, sourceTitle, sourceUrl } };
 }
 
 export function validateDeltaPayload(payload) {

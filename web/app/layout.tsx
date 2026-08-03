@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "思考情报台",
   description: "一个私有的判断工作台。",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "收录",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

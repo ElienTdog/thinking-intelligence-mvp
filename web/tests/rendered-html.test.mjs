@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { canWriteDelta, validateDeltaPayload } from "../app/lib/validation.mjs";
+import { canWriteDelta, validateClipPayload, validateDeltaPayload } from "../app/lib/validation.mjs";
 
 
 test("declares the private Alpha sign-in boundary", async () => {
@@ -19,6 +19,7 @@ test("does not retain the starter preview in product sources", async () => {
   ]);
   assert.match(page, /JudgmentWorkbench/);
   assert.match(page, /force-dynamic/);
+  assert.match(page, /requestedCapture/);
   assert.match(layout, /思考情报台/);
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -32,6 +33,15 @@ test("rejects an empty or unknown judgment response", () => {
 test("requires a validation scenario for real-world verification", () => {
   assert.match(validateDeltaPayload({ questionId: "q", materialId: "m", responseType: "validate_in_context", responseText: "test it" }).error, /validationScenario/);
   assert.deepEqual(validateDeltaPayload({ questionId: "q", materialId: "m", responseType: "validate_in_context", responseText: "test it", validationScenario: "next interview" }).value, { questionId: "q", materialId: "m", responseType: "validate_in_context", responseText: "test it", validationScenario: "next interview" });
+});
+
+test("captures raw mobile material without forcing it into a question", () => {
+  assert.match(validateClipPayload({ content: "" }).error, /content/);
+  assert.match(validateClipPayload({ content: "note", sourceUrl: "file:///private" }).error, /sourceUrl/);
+  assert.deepEqual(
+    validateClipPayload({ content: "https://example.com/post", sourceTitle: "A post", sourceUrl: "https://example.com/post" }).value,
+    { content: "https://example.com/post", sourceTitle: "A post", sourceUrl: "https://example.com/post" },
+  );
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

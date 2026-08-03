@@ -16,6 +16,15 @@ export type Material = {
   createdAt: string;
 };
 
+export type Clip = {
+  id: string;
+  content: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  status: "captured";
+  createdAt: string;
+};
+
 export type JudgmentDelta = {
   id: string;
   questionId: string;
@@ -31,4 +40,5 @@ export type BootstrapPayload = {
   questions: Question[];
   materials: Material[];
   deltas: JudgmentDelta[];
+  clips: Clip[];
 };

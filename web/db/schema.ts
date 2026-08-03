@@ -29,6 +29,20 @@ export const materials = sqliteTable(
   (table) => [index("idx_materials_owner_question").on(table.ownerId, table.questionId)],
 );
 
+export const clips = sqliteTable(
+  "clips",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    content: text("content").notNull(),
+    sourceUrl: text("source_url").notNull().default(""),
+    sourceTitle: text("source_title").notNull().default(""),
+    status: text("status").notNull().default("captured"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_clips_owner_created").on(table.ownerId, table.createdAt)],
+);
+
 export const judgmentDeltas = sqliteTable(
   "judgment_deltas",
   {

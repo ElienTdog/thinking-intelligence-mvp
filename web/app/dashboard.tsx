@@ -1,7 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { BootstrapPayload, JudgmentDelta, Material, Question } from "./lib/types";
+import type { BootstrapPayload, Clip, JudgmentDelta, Material, Question } from "./lib/types";
+
+type View = "pending" | "questions" | "materials" | "deltas" | "capture";
 
 const responseLabels: Record<JudgmentDelta["responseType"], string> = {
   partially_accept: "部分接受",
@@ -19,13 +21,42 @@ async function requestJson(path: string, body?: unknown) {
   return payload;
 }
 
+function isHttpUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function clipTitle(clip: Clip) {
+  if (clip.sourceTitle) return clip.sourceTitle;
+  if (clip.sourceUrl) {
+    try {
+      return new URL(clip.sourceUrl).hostname.replace(/^www\./, "");
+    } catch {
+      return "未命名素材";
+    }
+  }
+  return clip.content.split("\n").find(Boolean)?.slice(0, 48) || "未命名素材";
+}
+
+function clipPreview(clip: Clip) {
+  const preview = clip.content.replace(/\s+/g, " ").trim();
+  return preview.length > 180 ? `${preview.slice(0, 180)}...` : preview;
+}
+
 export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [data, setData] = useState<BootstrapPayload | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState("pending");
+  const [activeView, setActiveView] = useState<View>("pending");
   const [showQuestionForm, setShowQuestionForm] = useState(false);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [respondingTo, setRespondingTo] = useState<Material | null>(null);
+  const [captureContent, setCaptureContent] = useState("");
+  const [captureSourceTitle, setCaptureSourceTitle] = useState("");
+  const [captureSourceUrl, setCaptureSourceUrl] = useState("");
   const [notice, setNotice] = useState("");
 
   const load = async () => {
@@ -44,10 +75,23 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get("capture");
+    if (!value) return;
+    const timer = window.setTimeout(() => {
+      setCaptureContent(value);
+      setCaptureSourceUrl(isHttpUrl(value) ? value : "");
+      setActiveView("capture");
+    }, 0);
+    window.history.replaceState({}, "", window.location.pathname);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const selectedQuestion = useMemo(() => data?.questions.find((item) => item.id === selectedQuestionId) ?? null,
     [data, selectedQuestionId]);
   const materials = useMemo(() => data?.materials.filter((item) => item.questionId === selectedQuestionId) ?? [], [data, selectedQuestionId]);
   const deltas = useMemo(() => data?.deltas.filter((item) => item.questionId === selectedQuestionId) ?? [], [data, selectedQuestionId]);
+  const clips = data?.clips ?? [];
   const latestByMaterial = useMemo(() => {
     const value = new Map<string, JudgmentDelta>();
     deltas.forEach((delta) => { if (!value.has(delta.materialId)) value.set(delta.materialId, delta); });
@@ -73,7 +117,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const form = new FormData(formElement);
     try {
       await requestJson("/api/materials", { questionId: selectedQuestionId, type: form.get("type"), title: form.get("title"), challenge: form.get("challenge"), relevance: form.get("relevance") });
-      formElement.reset(); setShowMaterialForm(false); setNotice("材料已保存。现在写一句回应，留下判断的变化。 "); await load();
+      formElement.reset(); setShowMaterialForm(false); setNotice("材料已保存。现在写一句回应，留下判断的变化。"); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
@@ -84,40 +128,75 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     if (!respondingTo) return;
     try {
       await requestJson("/api/judgment-deltas", { questionId: selectedQuestionId, materialId: respondingTo.id, responseType: form.get("responseType"), responseText: form.get("responseText"), validationScenario: form.get("validationScenario") });
-      formElement.reset(); setRespondingTo(null); setNotice("判断差分已保存；它不会自动改写你的临时立场。 "); await load();
+      formElement.reset(); setRespondingTo(null); setNotice("判断差分已保存。它不会自动改写你的临时立场。"); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
-  if (!data) return <main className="loading">正在打开你的判断工作台…</main>;
+  async function readClipboard() {
+    if (!navigator.clipboard?.readText) {
+      setNotice("当前浏览器无法读取剪贴板，请直接粘贴内容。");
+      return;
+    }
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (!text) throw new Error("剪贴板为空");
+      setCaptureContent(text);
+      if (isHttpUrl(text)) setCaptureSourceUrl(text);
+      setNotice("已读入剪贴板内容。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "无法读取剪贴板");
+    }
+  }
+
+  async function createClip(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sourceUrl = captureSourceUrl.trim() || (isHttpUrl(captureContent) ? captureContent.trim() : "");
+    try {
+      await requestJson("/api/clips", { content: captureContent, sourceTitle: captureSourceTitle, sourceUrl });
+      setCaptureContent(""); setCaptureSourceTitle(""); setCaptureSourceUrl("");
+      setNotice("已收录到素材库。它还不是你的判断。"); await load();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "收录失败"); }
+  }
+
+  if (!data) return <main className="loading" aria-busy="true"><div className="loading-stack"><span /><span /><span /></div><p>正在打开你的判断工作台</p></main>;
+
+  const isCapture = activeView === "capture";
+  const heading = isCapture ? "把刚才看到的留住" : selectedQuestion?.title ?? "从一个真实问题开始";
+  const eyebrow = isCapture ? "收录素材" : activeView === "pending" ? "最小判断闭环" : "你的工作区";
 
   return <main className="workbench-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">↗</span><span>思考情报台</span></div>
       <p className="account">{displayName}</p>
-      <nav aria-label="工作台导航">
-        <button className={activeView === "pending" ? "nav-active" : ""} onClick={() => setActiveView("pending")}>待我判断 <em>{needsValidation.length + unanswered.length}</em></button>
-        <button className={activeView === "questions" ? "nav-active" : ""} onClick={() => setActiveView("questions")}>问题</button>
-        <button className={activeView === "materials" ? "nav-active" : ""} onClick={() => setActiveView("materials")}>材料</button>
-        <button className={activeView === "deltas" ? "nav-active" : ""} onClick={() => setActiveView("deltas")}>判断差分</button>
+      <nav className="desktop-nav" aria-label="工作台导航">
+        <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="待我判断" count={needsValidation.length + unanswered.length} />
+        <NavButton view="capture" activeView={activeView} onSelect={setActiveView} label="收录素材" />
+        <NavButton view="questions" activeView={activeView} onSelect={setActiveView} label="问题" />
+        <NavButton view="materials" activeView={activeView} onSelect={setActiveView} label="素材库" count={clips.length} />
+        <NavButton view="deltas" activeView={activeView} onSelect={setActiveView} label="判断差分" />
       </nav>
-      <button className="secondary full" onClick={() => setShowQuestionForm((visible) => !visible)}>+ 新问题</button>
+      <button className="secondary full" onClick={() => setShowQuestionForm((visible) => !visible)}>新问题</button>
       {showQuestionForm && <form className="compact-form sidebar-form" onSubmit={createQuestion}>
         <label>问题<input name="title" required maxLength={280} placeholder="我正在判断什么？" /></label>
         <label>我的初始判断<textarea name="initialJudgment" required maxLength={2000} placeholder="先保留粗糙但真实的起点。" /></label>
-        <label>优先级<select name="priority" defaultValue="1"><option value="1">P1 · 现在最重要</option><option value="2">P2 · 值得跟进</option><option value="3">P3 · 暂存</option></select></label>
+        <label>优先级<select name="priority" defaultValue="1"><option value="1">P1 现在最重要</option><option value="2">P2 值得跟进</option><option value="3">P3 暂存</option></select></label>
         <button className="primary">保存问题</button>
       </form>}
-      <p className="privacy-note">线上只保存你的主动记录；本地 Markdown 不会被同步。</p>
+      <p className="privacy-note">线上只保存你的主动记录。本地 Markdown 不会被同步。</p>
     </aside>
 
     <section className="content-panel">
       <header className="panel-head">
-        <div><p className="eyebrow">{activeView === "pending" ? "最小判断闭环" : "你的工作区"}</p><h1>{selectedQuestion?.title ?? "从一个真实问题开始"}</h1></div>
-        {selectedQuestion && <button className="secondary" onClick={() => setShowMaterialForm((visible) => !visible)}>+ 添加材料</button>}
+        <div><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1></div>
+        <div className="panel-actions">
+          <button className={isCapture ? "secondary" : "primary"} onClick={() => setActiveView("capture")}>收录</button>
+          {selectedQuestion && !isCapture && <button className="secondary" onClick={() => setShowMaterialForm((visible) => !visible)}>添加材料</button>}
+        </div>
       </header>
       {notice && <p className="notice" role="status">{notice}</p>}
-      {!selectedQuestion && <div className="empty"><h2>先写下一个问题</h2><p>它不需要完整。写下你正在做判断的那个真实情境，再让材料来挑战它。</p><button className="primary" onClick={() => setShowQuestionForm(true)}>创建第一个问题</button></div>}
-      {showMaterialForm && selectedQuestion && <form className="material-form" onSubmit={createMaterial}>
+      {isCapture && <CapturePanel content={captureContent} sourceTitle={captureSourceTitle} sourceUrl={captureSourceUrl} clips={clips} onContentChange={setCaptureContent} onSourceTitleChange={setCaptureSourceTitle} onSourceUrlChange={setCaptureSourceUrl} onPaste={() => void readClipboard()} onSubmit={createClip} />}
+      {!isCapture && !selectedQuestion && activeView !== "materials" && <div className="empty"><h2>先写下一个问题</h2><p>它不需要完整。写下你正在做判断的真实情境，再让材料来挑战它。</p><button className="primary" onClick={() => setShowQuestionForm(true)}>创建第一个问题</button></div>}
+      {showMaterialForm && selectedQuestion && !isCapture && <form className="material-form" onSubmit={createMaterial}>
         <div className="form-title">把一条材料放进这个问题</div>
         <div className="form-grid"><label>类型<select name="type" defaultValue="source"><option value="source">外部来源</option><option value="card">思考卡</option></select></label><label>标题<input name="title" required maxLength={280} placeholder="它在说什么？" /></label></div>
         <label>它带来的挑战<textarea name="challenge" required maxLength={2000} placeholder="它怎样不同意、限制或重写我的判断？" /></label>
@@ -129,7 +208,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
         {queue.map((item) => item.kind === "delta" ? <DeltaCard key={item.delta.id} delta={item.delta} material={materials.find((material) => material.id === item.delta.materialId)} /> : <MaterialCard key={item.material.id} material={item.material} onRespond={() => setRespondingTo(item.material)} />)}
       </div>}
       {selectedQuestion && activeView === "questions" && <QuestionList questions={data.questions} selectedId={selectedQuestionId} onSelect={setSelectedQuestionId} />}
-      {selectedQuestion && activeView === "materials" && <div className="stream">{materials.length ? materials.map((material) => <MaterialCard key={material.id} material={material} onRespond={() => setRespondingTo(material)} />) : <div className="empty compact"><p>还没有材料。</p></div>}</div>}
+      {activeView === "materials" && <MaterialLibrary clips={clips} materials={materials} onCapture={() => setActiveView("capture")} />}
       {selectedQuestion && activeView === "deltas" && <div className="stream">{deltas.length ? deltas.map((delta) => <DeltaCard key={delta.id} delta={delta} material={materials.find((material) => material.id === delta.materialId)} />) : <div className="empty compact"><p>还没有判断差分。</p></div>}</div>}
       {respondingTo && <form className="response-form" onSubmit={createDelta}>
         <div><p className="eyebrow">回应材料</p><h2>{respondingTo.title}</h2></div>
@@ -141,17 +220,62 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     </section>
 
     <aside className="insight-panel">
-      <p className="eyebrow">当前问题</p><h2>{selectedQuestion?.title ?? "—"}</h2>
+      <p className="eyebrow">当前问题</p><h2>{selectedQuestion?.title ?? "未选择"}</h2>
       <section><p className="section-label">初始判断</p><p>{selectedQuestion?.initialJudgment ?? "先写下你的起点。"}</p></section>
       <section><p className="section-label">当前临时立场</p><p className="muted">尚未确认。这里不会由材料或 AI 自动写入。</p></section>
       <section><p className="section-label">判断差分</p><div className="stat-row"><strong>{unanswered.length}</strong><span>待回应</span></div><div className="stat-row"><strong>{needsValidation.length}</strong><span>待真实场景验证</span></div></section>
       {deltas[0] && <section><p className="section-label">最新记录</p><p className="delta-copy">{deltas[0].responseText}</p></section>}
     </aside>
+
+    <nav className="mobile-nav" aria-label="移动端导航">
+      <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="待判断" count={needsValidation.length + unanswered.length} />
+      <NavButton view="capture" activeView={activeView} onSelect={setActiveView} label="收录" />
+      <NavButton view="materials" activeView={activeView} onSelect={setActiveView} label="素材" count={clips.length} />
+      <NavButton view="questions" activeView={activeView} onSelect={setActiveView} label="问题" />
+    </nav>
   </main>;
 }
 
-function MaterialCard({ material, onRespond }: { material: Material; onRespond: () => void }) {
-  return <article className="card material-card"><div className="card-meta">{material.type === "source" ? "外部来源" : "思考卡"}</div><h2>{material.title}</h2><p><b>挑战：</b>{material.challenge}</p><p><b>关联：</b>{material.relevance}</p><button className="primary" onClick={onRespond}>回应这条材料</button></article>;
+function NavButton({ view, activeView, onSelect, label, count }: { view: View; activeView: View; onSelect: (view: View) => void; label: string; count?: number }) {
+  return <button className={activeView === view ? "nav-active" : ""} onClick={() => onSelect(view)}>{label}{typeof count === "number" && <em>{count}</em>}</button>;
+}
+
+function CapturePanel({ content, sourceTitle, sourceUrl, clips, onContentChange, onSourceTitleChange, onSourceUrlChange, onPaste, onSubmit }: {
+  content: string;
+  sourceTitle: string;
+  sourceUrl: string;
+  clips: Clip[];
+  onContentChange: (value: string) => void;
+  onSourceTitleChange: (value: string) => void;
+  onSourceUrlChange: (value: string) => void;
+  onPaste: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return <section className="capture-studio">
+    <p className="capture-lede">先原样保存，整理留到之后。</p>
+    <form className="capture-form" onSubmit={onSubmit}>
+      <label>内容<textarea name="content" value={content} required maxLength={8000} onChange={(event) => onContentChange(event.target.value)} placeholder="链接、一段文字，或刚刚复制的内容" /></label>
+      <div className="form-grid"><label>标题（可选）<input name="sourceTitle" value={sourceTitle} maxLength={280} onChange={(event) => onSourceTitleChange(event.target.value)} placeholder="给它一个方便回看的名字" /></label><label>来源链接（可选）<input name="sourceUrl" value={sourceUrl} inputMode="url" onChange={(event) => onSourceUrlChange(event.target.value)} placeholder="https://" /></label></div>
+      <div className="form-actions capture-actions"><button type="button" className="secondary" onClick={onPaste}>读取剪贴板</button><button className="primary">收录素材</button></div>
+    </form>
+    <section className="recent-clips"><div className="library-heading"><p className="eyebrow">最近收录</p><span>{clips.length}</span></div>{clips.length ? clips.slice(0, 3).map((clip) => <ClipRow key={clip.id} clip={clip} />) : <p className="muted">还没有素材。</p>}</section>
+  </section>;
+}
+
+function MaterialLibrary({ clips, materials, onCapture }: { clips: Clip[]; materials: Material[]; onCapture: () => void }) {
+  return <section className="material-library">
+    <div className="library-heading"><div><p className="eyebrow">待整理</p><h2>素材库</h2></div><button className="primary" onClick={onCapture}>收录素材</button></div>
+    {clips.length ? <div className="clip-list">{clips.map((clip) => <ClipRow key={clip.id} clip={clip} />)}</div> : <div className="empty compact"><p>还没有收录素材。</p></div>}
+    {materials.length > 0 && <><div className="library-heading linked-heading"><div><p className="eyebrow">已关联当前问题</p><h2>判断材料</h2></div></div><div className="stream">{materials.map((material) => <MaterialCard key={material.id} material={material} />)}</div></>}
+  </section>;
+}
+
+function ClipRow({ clip }: { clip: Clip }) {
+  return <article className="clip-row"><div className="clip-meta"><span>待整理</span>{clip.sourceUrl && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">打开来源</a>}</div><h3>{clipTitle(clip)}</h3><p>{clipPreview(clip)}</p></article>;
+}
+
+function MaterialCard({ material, onRespond }: { material: Material; onRespond?: () => void }) {
+  return <article className="card material-card"><div className="card-meta">{material.type === "source" ? "外部来源" : "思考卡"}</div><h2>{material.title}</h2><p><b>挑战：</b>{material.challenge}</p><p><b>关联：</b>{material.relevance}</p>{onRespond && <button className="primary" onClick={onRespond}>回应这条材料</button>}</article>;
 }
 
 function DeltaCard({ delta, material }: { delta: JudgmentDelta; material?: Material }) {
