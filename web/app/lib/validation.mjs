@@ -37,18 +37,29 @@ export function validateMaterialPayload(payload) {
 
 export function validateClipPayload(payload) {
   const content = cleanText(payload?.content, MAX_CAPTURE_TEXT);
-  const sourceTitle = cleanText(payload?.sourceTitle, MAX_SHORT_TEXT);
-  const sourceUrl = cleanText(payload?.sourceUrl, MAX_LONG_TEXT);
   if (!content) return { error: "content is required" };
-  if (sourceUrl) {
-    try {
-      const url = new URL(sourceUrl);
-      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("unsupported protocol");
-    } catch {
-      return { error: "sourceUrl must be an http or https URL" };
-    }
+  const sourceUrl = findHttpUrl(content);
+  return { value: { content, sourceTitle: makeClipTitle(content, sourceUrl), sourceUrl } };
+}
+
+function findHttpUrl(content) {
+  const match = content.match(/https?:\/\/[^\s<>"']+/i);
+  if (!match) return "";
+  const candidate = match[0].replace(/[),.;!?\]}]+$/, "");
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? candidate : "";
+  } catch {
+    return "";
   }
-  return { value: { content, sourceTitle, sourceUrl } };
+}
+
+function makeClipTitle(content, sourceUrl) {
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  const textTitle = firstLine.replace(/https?:\/\/[^\s<>"']+/gi, "").replace(/\s+/g, " ").trim();
+  if (textTitle) return textTitle.slice(0, MAX_SHORT_TEXT);
+  if (sourceUrl) return new URL(sourceUrl).hostname.replace(/^www\./, "");
+  return content.replace(/\s+/g, " ").slice(0, MAX_SHORT_TEXT);
 }
 
 export function validateDeltaPayload(payload) {

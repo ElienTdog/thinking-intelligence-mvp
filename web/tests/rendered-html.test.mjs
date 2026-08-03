@@ -35,13 +35,19 @@ test("requires a validation scenario for real-world verification", () => {
   assert.deepEqual(validateDeltaPayload({ questionId: "q", materialId: "m", responseType: "validate_in_context", responseText: "test it", validationScenario: "next interview" }).value, { questionId: "q", materialId: "m", responseType: "validate_in_context", responseText: "test it", validationScenario: "next interview" });
 });
 
-test("captures raw mobile material without forcing it into a question", () => {
+test("captures raw material with generated metadata and no required form fields", async () => {
   assert.match(validateClipPayload({ content: "" }).error, /content/);
-  assert.match(validateClipPayload({ content: "note", sourceUrl: "file:///private" }).error, /sourceUrl/);
   assert.deepEqual(
-    validateClipPayload({ content: "https://example.com/post", sourceTitle: "A post", sourceUrl: "https://example.com/post" }).value,
-    { content: "https://example.com/post", sourceTitle: "A post", sourceUrl: "https://example.com/post" },
+    validateClipPayload({ content: "https://www.example.com/post" }).value,
+    { content: "https://www.example.com/post", sourceTitle: "example.com", sourceUrl: "https://www.example.com/post" },
   );
+  assert.deepEqual(
+    validateClipPayload({ content: "一个还没想清楚的判断\n先留下来" }).value,
+    { content: "一个还没想清楚的判断\n先留下来", sourceTitle: "一个还没想清楚的判断", sourceUrl: "" },
+  );
+  const dashboard = await readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8");
+  assert.match(dashboard, /收录剪贴板/);
+  assert.doesNotMatch(dashboard, /标题（可选）|来源链接（可选）/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

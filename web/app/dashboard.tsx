@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BootstrapPayload, Clip, JudgmentDelta, Material, Question } from "./lib/types";
 
 type View = "pending" | "questions" | "materials" | "deltas" | "capture";
@@ -19,15 +19,6 @@ async function requestJson(path: string, body?: unknown) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error ?? "请求未完成");
   return payload;
-}
-
-function isHttpUrl(value: string) {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function clipTitle(clip: Clip) {
@@ -55,11 +46,10 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [respondingTo, setRespondingTo] = useState<Material | null>(null);
   const [captureContent, setCaptureContent] = useState("");
-  const [captureSourceTitle, setCaptureSourceTitle] = useState("");
-  const [captureSourceUrl, setCaptureSourceUrl] = useState("");
   const [notice, setNotice] = useState("");
+  const captureFromLinkStarted = useRef(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const next = await requestJson("/api/bootstrap") as BootstrapPayload;
       setData(next);
@@ -68,24 +58,37 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "暂时无法读取工作区");
     }
-  };
+  }, []);
+
+  const saveClip = useCallback(async (content: string) => {
+    const value = content.trim();
+    try {
+      await requestJson("/api/clips", { content: value });
+      setCaptureContent("");
+      setNotice("已收录到素材库。它还不是你的判断。");
+      await load();
+    } catch (error) {
+      setCaptureContent(value);
+      setNotice(error instanceof Error ? error.message : "收录失败");
+    }
+  }, [load]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get("capture");
-    if (!value) return;
+    if (!value || captureFromLinkStarted.current) return;
+    captureFromLinkStarted.current = true;
     const timer = window.setTimeout(() => {
-      setCaptureContent(value);
-      setCaptureSourceUrl(isHttpUrl(value) ? value : "");
       setActiveView("capture");
+      void saveClip(value);
     }, 0);
     window.history.replaceState({}, "", window.location.pathname);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [saveClip]);
 
   const selectedQuestion = useMemo(() => data?.questions.find((item) => item.id === selectedQuestionId) ?? null,
     [data, selectedQuestionId]);
@@ -132,7 +135,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     } catch (error) { setNotice(error instanceof Error ? error.message : "保存失败"); }
   }
 
-  async function readClipboard() {
+  async function captureClipboard() {
     if (!navigator.clipboard?.readText) {
       setNotice("当前浏览器无法读取剪贴板，请直接粘贴内容。");
       return;
@@ -140,9 +143,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     try {
       const text = (await navigator.clipboard.readText()).trim();
       if (!text) throw new Error("剪贴板为空");
-      setCaptureContent(text);
-      if (isHttpUrl(text)) setCaptureSourceUrl(text);
-      setNotice("已读入剪贴板内容。");
+      await saveClip(text);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "无法读取剪贴板");
     }
@@ -150,19 +151,14 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   async function createClip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const sourceUrl = captureSourceUrl.trim() || (isHttpUrl(captureContent) ? captureContent.trim() : "");
-    try {
-      await requestJson("/api/clips", { content: captureContent, sourceTitle: captureSourceTitle, sourceUrl });
-      setCaptureContent(""); setCaptureSourceTitle(""); setCaptureSourceUrl("");
-      setNotice("已收录到素材库。它还不是你的判断。"); await load();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "收录失败"); }
+    await saveClip(captureContent);
   }
 
   if (!data) return <main className="loading" aria-busy="true"><div className="loading-stack"><span /><span /><span /></div><p>正在打开你的判断工作台</p></main>;
 
   const isCapture = activeView === "capture";
-  const heading = isCapture ? "把刚才看到的留住" : selectedQuestion?.title ?? "从一个真实问题开始";
-  const eyebrow = isCapture ? "收录素材" : activeView === "pending" ? "最小判断闭环" : "你的工作区";
+  const heading = isCapture ? "收录" : selectedQuestion?.title ?? "从一个真实问题开始";
+  const eyebrow = isCapture ? "复制即知识" : activeView === "pending" ? "最小判断闭环" : "你的工作区";
 
   return <main className="workbench-shell">
     <aside className="sidebar">
@@ -194,7 +190,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
         </div>
       </header>
       {notice && <p className="notice" role="status">{notice}</p>}
-      {isCapture && <CapturePanel content={captureContent} sourceTitle={captureSourceTitle} sourceUrl={captureSourceUrl} clips={clips} onContentChange={setCaptureContent} onSourceTitleChange={setCaptureSourceTitle} onSourceUrlChange={setCaptureSourceUrl} onPaste={() => void readClipboard()} onSubmit={createClip} />}
+      {isCapture && <CapturePanel content={captureContent} clips={clips} onContentChange={setCaptureContent} onCaptureClipboard={() => void captureClipboard()} onSubmit={createClip} />}
       {!isCapture && !selectedQuestion && activeView !== "materials" && <div className="empty"><h2>先写下一个问题</h2><p>它不需要完整。写下你正在做判断的真实情境，再让材料来挑战它。</p><button className="primary" onClick={() => setShowQuestionForm(true)}>创建第一个问题</button></div>}
       {showMaterialForm && selectedQuestion && !isCapture && <form className="material-form" onSubmit={createMaterial}>
         <div className="form-title">把一条材料放进这个问题</div>
@@ -240,24 +236,22 @@ function NavButton({ view, activeView, onSelect, label, count }: { view: View; a
   return <button className={activeView === view ? "nav-active" : ""} onClick={() => onSelect(view)}>{label}{typeof count === "number" && <em>{count}</em>}</button>;
 }
 
-function CapturePanel({ content, sourceTitle, sourceUrl, clips, onContentChange, onSourceTitleChange, onSourceUrlChange, onPaste, onSubmit }: {
+function CapturePanel({ content, clips, onContentChange, onCaptureClipboard, onSubmit }: {
   content: string;
-  sourceTitle: string;
-  sourceUrl: string;
   clips: Clip[];
   onContentChange: (value: string) => void;
-  onSourceTitleChange: (value: string) => void;
-  onSourceUrlChange: (value: string) => void;
-  onPaste: () => void;
+  onCaptureClipboard: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return <section className="capture-studio">
-    <p className="capture-lede">先原样保存，整理留到之后。</p>
-    <form className="capture-form" onSubmit={onSubmit}>
-      <label>内容<textarea name="content" value={content} required maxLength={8000} onChange={(event) => onContentChange(event.target.value)} placeholder="链接、一段文字，或刚刚复制的内容" /></label>
-      <div className="form-grid"><label>标题（可选）<input name="sourceTitle" value={sourceTitle} maxLength={280} onChange={(event) => onSourceTitleChange(event.target.value)} placeholder="给它一个方便回看的名字" /></label><label>来源链接（可选）<input name="sourceUrl" value={sourceUrl} inputMode="url" onChange={(event) => onSourceUrlChange(event.target.value)} placeholder="https://" /></label></div>
-      <div className="form-actions capture-actions"><button type="button" className="secondary" onClick={onPaste}>读取剪贴板</button><button className="primary">收录素材</button></div>
-    </form>
+    <button type="button" className="primary capture-clipboard" onClick={onCaptureClipboard}>收录剪贴板</button>
+    <details className="manual-capture">
+      <summary>手动粘贴</summary>
+      <form className="capture-form" onSubmit={onSubmit}>
+        <textarea name="content" aria-label="粘贴内容" value={content} required maxLength={8000} onChange={(event) => onContentChange(event.target.value)} placeholder="链接或一段文字" />
+        <div className="form-actions capture-actions"><button className="secondary">保存</button></div>
+      </form>
+    </details>
     <section className="recent-clips"><div className="library-heading"><p className="eyebrow">最近收录</p><span>{clips.length}</span></div>{clips.length ? clips.slice(0, 3).map((clip) => <ClipRow key={clip.id} clip={clip} />) : <p className="muted">还没有素材。</p>}</section>
   </section>;
 }
