@@ -135,7 +135,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   const generateToday = useCallback(() => {
     setIsGenerating(true);
-    void requestJson("/api/injection/run")
+    void requestJson("/api/injection/run", {})
       .then(async () => {
         setNotice("今日 Raw、知识卡与故事已刷新。");
         await load();

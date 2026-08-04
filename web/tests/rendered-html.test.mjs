@@ -88,6 +88,7 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(runRoute, /DEEPSEEK_API_KEY/);
   assert.match(dashboard, /KnowledgeFeed/);
   assert.match(dashboard, /今日故事/);
+  assert.match(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {
