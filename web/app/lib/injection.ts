@@ -31,6 +31,7 @@ type Candidate = {
   publishedAt: string;
   verificationStatus: "verified" | "lead";
   sourceType: "article" | "video";
+  discoveredVia: "source_feed" | "aihot";
 };
 
 type CompiledCard = {
@@ -201,8 +202,11 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
     known.add(key);
     return true;
   });
-  return Promise.all(unique.map(async (candidate) => {
-    if (candidate.verificationStatus === "lead") return candidate;
+  const verificationBatch = [
+    ...unique.filter((candidate) => candidate.discoveredVia === "aihot").slice(0, 6),
+    ...unique.filter((candidate) => candidate.discoveredVia === "source_feed").slice(0, 18),
+  ];
+  return Promise.all(verificationBatch.map(async (candidate) => {
     const excerpt = await fetchPublicSourceExcerpt(candidate.url, fetcher);
     return excerpt.length >= 180
       ? { ...candidate, excerpt }
@@ -330,21 +334,24 @@ export function parseCompiledCard(value: string): CompiledCard {
 }
 
 export function parseAiHotCandidates(body: string): Candidate[] {
-  const payload = JSON.parse(body) as { items?: unknown[]; data?: { items?: unknown[] } } | unknown[];
-  const items = Array.isArray(payload) ? payload : payload.items ?? payload.data?.items ?? [];
+  const payload = JSON.parse(body) as { items?: unknown[] } | unknown[];
+  const items = Array.isArray(payload) ? payload : payload.items ?? [];
   return items.flatMap((item) => {
     const value = item as Record<string, unknown>;
-    const url = String(value.original_url ?? value.originalUrl ?? value.url ?? "");
+    const links = value.links as Record<string, unknown> | undefined;
+    const source = value.source as Record<string, unknown> | undefined;
+    const url = String(links?.original ?? value.original_url ?? value.originalUrl ?? value.url ?? "");
     const title = String(value.title ?? "").trim();
     if (!title || !isPublicHttpUrl(url)) return [];
     return [{
       title,
       url,
       excerpt: cleanSnippet(String(value.summary ?? value.description ?? "")),
-      publisher: String(value.source ?? value.site_name ?? "AI HOT"),
+      publisher: String(source?.name ?? value.site_name ?? "AI HOT"),
       publishedAt: String(value.published_at ?? value.publishedAt ?? ""),
       verificationStatus: "lead" as const,
       sourceType: "article" as const,
+      discoveredVia: "aihot" as const,
     }];
   });
 }
@@ -364,6 +371,7 @@ export function parseRssCandidates(body: string, publisher: string): Candidate[]
       publishedAt: xmlText(section, "pubDate") || xmlText(section, "updated") || xmlText(section, "published"),
       verificationStatus: "verified" as const,
       sourceType: "article" as const,
+      discoveredVia: "source_feed" as const,
     }];
   });
 }
