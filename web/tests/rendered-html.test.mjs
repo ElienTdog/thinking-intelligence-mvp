@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { canWriteDelta, isCompilableRawSource, rankKnowledgeCards, validateClipPayload, validateDeltaPayload, validateFeedEventPayload } from "../app/lib/validation.mjs";
+import { canWriteDelta, isCompilableRawSource, rankKnowledgeCards, validateClipPayload, validateDeltaPayload, validateFeedEventPayload, validateLearningAttemptPayload } from "../app/lib/validation.mjs";
 
 
 test("declares the private Alpha sign-in boundary", async () => {
@@ -57,6 +57,15 @@ test("keeps unverifiable and transcript-free raw sources out of the compiler", (
   assert.equal(isCompilableRawSource({ content: "可靠的主动收录文本", sourceUrl: "", sourceType: "text", rawExcerpt: "可靠的主动收录文本" }), true);
 });
 
+test("requires a real page and user response for a recall attempt", () => {
+  assert.ok(validateLearningAttemptPayload({ pageId: "", promptType: "recall", response: "我记得" }).error);
+  assert.ok(validateLearningAttemptPayload({ pageId: "page", promptType: "invented", response: "我记得" }).error);
+  assert.deepEqual(
+    validateLearningAttemptPayload({ pageId: "page", promptType: "transfer", response: "下次评审时试一次" }).value,
+    { pageId: "page", promptType: "transfer", response: "下次评审时试一次" },
+  );
+});
+
 test("ranks unseen cards ahead of muted cards and validates feedback", () => {
   const cards = [
     { id: "new", tags: '["AI"]', createdAt: new Date().toISOString(), storyId: null },
@@ -69,32 +78,52 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
 });
 
 test("declares the owner-scoped feed and daily injection surfaces", async () => {
-  const [schema, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard] = await Promise.all([
+  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0003_exotic_whirlwind.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/knowledge-workspace.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feed-events/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/injection/run/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/clips/[clipId]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/wiki/lint/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(schema, /source_feeds/);
   assert.match(schema, /knowledge_cards/);
   assert.match(schema, /feed_events/);
   assert.match(schema, /injection_runs/);
+  assert.match(schema, /wiki_pages/);
+  assert.match(schema, /wiki_links/);
+  assert.match(schema, /wiki_page_sources/);
+  assert.match(schema, /wiki_activity/);
+  assert.match(schema, /learning_attempts/);
+  assert.match(migration, /wiki_pages/);
+  assert.match(migration, /wiki_links/);
+  assert.match(migration, /wiki_page_id/);
+  assert.match(workspace, /数字生命卡兹克|赛博禅心|量子位|Datawhale/);
+  assert.match(workspace, /MacTalk/);
   assert.match(worker, /scheduled\(/);
   assert.match(worker, /runDailyInjection/);
   assert.match(feedRoute, /knowledgeCards\.ownerId/);
   assert.match(eventRoute, /knowledgeCards\.ownerId/);
   assert.match(runRoute, /DEEPSEEK_API_KEY/);
   assert.match(dashboard, /KnowledgeFeed/);
-  assert.match(dashboard, /onTouchEnd/);
-  assert.match(dashboard, /setSurface\(direction === "left" \? "story" : "raw"\)/);
+  assert.match(dashboard, /surface-track/);
+  assert.match(dashboard, /onTouchMove/);
+  assert.match(dashboard, /\/api\/learning-attempts/);
+  assert.match(dashboard, /\/api\/wiki\/lint/);
   assert.match(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
   assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
   assert.match(deleteRoute, /knowledgeCards\.ownerId/);
   assert.match(deleteRoute, /feedEvents/);
   assert.match(deleteRoute, /dailyStories/);
+  assert.match(deleteRoute, /wikiPages/);
+  assert.match(knowledgeFeed, /ReviewMomentView/);
+  assert.match(knowledgeFeed, /在 Wiki 里/);
+  assert.match(wikiRoute, /getWikiLint/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

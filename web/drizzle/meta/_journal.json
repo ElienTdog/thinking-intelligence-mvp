@@ -22,6 +22,13 @@
       "when": 1785861724928,
       "tag": "0002_right_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785865489657,
+      "tag": "0003_exotic_whirlwind",
+      "breakpoints": true
     }
   ]
 }

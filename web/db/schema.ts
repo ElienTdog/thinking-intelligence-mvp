@@ -98,6 +98,7 @@ export const knowledgeCards = sqliteTable(
     id: text("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
     rawSourceId: text("raw_source_id").notNull().references(() => clips.id),
+    wikiPageId: text("wiki_page_id").references(() => wikiPages.id),
     storyId: text("story_id").references(() => dailyStories.id),
     storyPosition: integer("story_position").notNull().default(0),
     title: text("title").notNull(),
@@ -117,6 +118,91 @@ export const knowledgeCards = sqliteTable(
     index("idx_cards_owner_created").on(table.ownerId, table.createdAt),
     index("idx_cards_owner_story").on(table.ownerId, table.storyId, table.storyPosition),
     index("idx_cards_owner_raw").on(table.ownerId, table.rawSourceId),
+  ],
+);
+
+export const wikiPages = sqliteTable(
+  "wiki_pages",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    evidenceStatus: text("evidence_status").notNull().default("verified"),
+    recallPrompt: text("recall_prompt").notNull().default(""),
+    transferPrompt: text("transfer_prompt").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_wiki_pages_owner_kind").on(table.ownerId, table.kind, table.updatedAt),
+    index("idx_wiki_pages_owner_title").on(table.ownerId, table.title),
+  ],
+);
+
+export const wikiPageSources = sqliteTable(
+  "wiki_page_sources",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    pageId: text("page_id").notNull().references(() => wikiPages.id),
+    rawSourceId: text("raw_source_id").notNull().references(() => clips.id),
+    contribution: text("contribution").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_wiki_page_sources_owner_page").on(table.ownerId, table.pageId),
+    index("idx_wiki_page_sources_owner_raw").on(table.ownerId, table.rawSourceId),
+  ],
+);
+
+export const wikiLinks = sqliteTable(
+  "wiki_links",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    fromPageId: text("from_page_id").notNull().references(() => wikiPages.id),
+    toPageId: text("to_page_id").notNull().references(() => wikiPages.id),
+    relation: text("relation").notNull(),
+    rationale: text("rationale").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_wiki_links_owner_from").on(table.ownerId, table.fromPageId),
+    index("idx_wiki_links_owner_to").on(table.ownerId, table.toPageId),
+  ],
+);
+
+export const wikiActivity = sqliteTable(
+  "wiki_activity",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    pageId: text("page_id").references(() => wikiPages.id),
+    action: text("action").notNull(),
+    message: text("message").notNull(),
+    metadata: text("metadata").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_wiki_activity_owner_created").on(table.ownerId, table.createdAt)],
+);
+
+export const learningAttempts = sqliteTable(
+  "learning_attempts",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    pageId: text("page_id").notNull().references(() => wikiPages.id),
+    promptType: text("prompt_type").notNull(),
+    response: text("response").notNull(),
+    nextReviewAt: text("next_review_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_learning_attempts_owner_due").on(table.ownerId, table.nextReviewAt),
+    index("idx_learning_attempts_owner_page").on(table.ownerId, table.pageId),
   ],
 );
 

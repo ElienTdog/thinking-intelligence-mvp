@@ -53,6 +53,12 @@ export const FEED_EVENT_TYPES = Object.freeze([
   "opened_source",
 ]);
 
+export const LEARNING_PROMPT_TYPES = Object.freeze([
+  "recall",
+  "transfer",
+  "counter",
+]);
+
 export function validateFeedEventPayload(payload) {
   const cardId = cleanText(payload?.cardId, MAX_SHORT_TEXT);
   const eventType = cleanText(payload?.eventType, 30);
@@ -60,6 +66,16 @@ export function validateFeedEventPayload(payload) {
     return { error: "cardId and a known eventType are required" };
   }
   return { value: { cardId, eventType } };
+}
+
+export function validateLearningAttemptPayload(payload) {
+  const pageId = cleanText(payload?.pageId, MAX_SHORT_TEXT);
+  const promptType = cleanText(payload?.promptType, 30);
+  const response = cleanText(payload?.response);
+  if (!pageId || !LEARNING_PROMPT_TYPES.includes(promptType) || !response) {
+    return { error: "pageId, promptType, and response are required" };
+  }
+  return { value: { pageId, promptType, response } };
 }
 
 export function isCompilableRawSource(source) {

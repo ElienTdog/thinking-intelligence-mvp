@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import { clips } from "../../../db/schema";
 import { compileQueuedSources, fetchPublicSourceExcerpt, hashContent } from "../../lib/injection";
 import { validateClipPayload } from "../../lib/validation.mjs";
+import { ensureWikiForCards } from "../../lib/wiki";
 import { requireApiUser } from "../auth";
 
 export async function POST(request: Request) {
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
       model: env.DEEPSEEK_MODEL,
     }, { sourceIds: [clip.id], limit: 1 })
     : [];
+  if (cards.length) await ensureWikiForCards(env.DB, auth.user.userId);
   return Response.json({ clip, card: cards[0] ?? null }, { status: 201 });
 }
 

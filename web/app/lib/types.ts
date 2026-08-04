@@ -39,6 +39,7 @@ export type Clip = {
 export type KnowledgeCard = {
   id: string;
   rawSourceId: string;
+  wikiPageId: string | null;
   storyId: string | null;
   storyPosition: number;
   title: string;
@@ -53,6 +54,49 @@ export type KnowledgeCard = {
   verificationStatus: "unknown" | "verified" | "lead" | "needs_transcript";
   state: "published";
   createdAt: string;
+};
+
+export type WikiPage = {
+  id: string;
+  kind: "claim" | "topic";
+  title: string;
+  summary: string;
+  evidenceStatus: string;
+  recallPrompt: string;
+  transferPrompt: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WikiLink = {
+  id: string;
+  fromPageId: string;
+  toPageId: string;
+  relation: "about" | "related_to" | "supports" | "contradicts" | "depends_on";
+  rationale: string;
+  createdAt: string;
+};
+
+export type WikiActivity = {
+  id: string;
+  pageId: string | null;
+  action: string;
+  message: string;
+  createdAt: string;
+};
+
+export type ReviewMoment = {
+  page: WikiPage;
+  cardId: string;
+  promptType: "recall" | "transfer" | "counter";
+};
+
+export type WikiSnapshot = {
+  pages: WikiPage[];
+  links: WikiLink[];
+  activity: WikiActivity[];
+  review: ReviewMoment | null;
 };
 
 export type DailyStory = {
@@ -89,4 +133,5 @@ export type BootstrapPayload = {
   cards: KnowledgeCard[];
   todayStory: DailyStory | null;
   storyCards: KnowledgeCard[];
+  wiki: WikiSnapshot;
 };

@@ -2,7 +2,7 @@ export type SourceSeed = {
   id: string;
   name: string;
   url: string;
-  feedType: "rss" | "aihot";
+  feedType: "rss" | "aihot" | "wechat_index" | "html_index";
   topic: string;
   trustLevel: number;
 };
@@ -15,6 +15,11 @@ export const DEFAULT_SOURCE_FEEDS: SourceSeed[] = [
   { id: "lilian-weng", name: "Lilian Weng", url: "https://lilianweng.github.io/index.xml", feedType: "rss", topic: "AI 研究", trustLevel: 3 },
   { id: "eugene-yan", name: "Eugene Yan", url: "https://eugeneyan.com/rss.xml", feedType: "rss", topic: "AI 产品", trustLevel: 3 },
   { id: "aihot-selected", name: "AI HOT 精选", url: "https://aihot.virxact.com/api/v1/items?mode=selected&window=24h&limit=12", feedType: "aihot", topic: "中文 AI 线索", trustLevel: 1 },
+  { id: "digital-life-khazix", name: "数字生命卡兹克", url: "https://www.jintiankansha.me/column/euZCfLlKpL?type=recent", feedType: "wechat_index", topic: "AI 实践", trustLevel: 1 },
+  { id: "cyber-zen", name: "赛博禅心", url: "https://www.jintiankansha.me/column/Jw0FKj6ccg?type=recent", feedType: "wechat_index", topic: "AI 产品", trustLevel: 1 },
+  { id: "qbitai", name: "量子位", url: "https://www.jintiankansha.me/column/8LA3hF4EoQ?type=recent", feedType: "wechat_index", topic: "AI 行业", trustLevel: 1 },
+  { id: "datawhale", name: "Datawhale", url: "https://www.jintiankansha.me/column/hdKbpkn3mM?type=recent", feedType: "wechat_index", topic: "AI 学习", trustLevel: 1 },
+  { id: "mactalk", name: "MacTalk", url: "https://macshuo.com/", feedType: "html_index", topic: "AI 与创作", trustLevel: 2 },
 ];
 
 export async function ensureKnowledgeWorkspace(db: D1Database, ownerId: string) {

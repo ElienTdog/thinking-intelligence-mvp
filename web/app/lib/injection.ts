@@ -1,11 +1,12 @@
 import { chinaDate, ensureKnowledgeWorkspace } from "./knowledge-workspace";
 import { isCompilableRawSource } from "./validation.mjs";
+import { ensureWikiForCards } from "./wiki";
 
 type FeedRow = {
   id: string;
   name: string;
   url: string;
-  feed_type: "rss" | "aihot";
+  feed_type: "rss" | "aihot" | "wechat_index" | "html_index";
   topic: string;
   trust_level: number;
 };
@@ -31,7 +32,8 @@ type Candidate = {
   publishedAt: string;
   verificationStatus: "verified" | "lead";
   sourceType: "article" | "video";
-  discoveredVia: "source_feed" | "aihot";
+  discoveredVia: "source_feed" | "aihot" | "wechat_index";
+  followed: boolean;
 };
 
 type CompiledCard = {
@@ -89,7 +91,7 @@ export async function runInjectionForOwner(db: D1Database, ownerId: string, conf
     const candidates = await collectCandidates(feeds.results ?? [], config.fetcher ?? fetch);
     let rawCreated = 0;
     const rawIds: string[] = [];
-    for (const candidate of candidates.slice(0, 12)) {
+    for (const candidate of candidates.slice(0, 18)) {
       const inserted = await insertCandidate(db, ownerId, candidate);
       if (inserted.created) rawCreated += 1;
       if (inserted.id && candidate.verificationStatus === "verified") rawIds.push(inserted.id);
@@ -99,6 +101,7 @@ export async function runInjectionForOwner(db: D1Database, ownerId: string, conf
       limit: DAILY_CARD_LIMIT,
       sourceIds: rawIds,
     });
+    await ensureWikiForCards(db, ownerId);
     if (cards.length >= 3) await createDailyStory(db, ownerId, runDate, cards, config);
 
     await db.prepare(`
@@ -188,9 +191,10 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
       const response = await fetcher(feed.url, { headers: { "user-agent": "ThinkingIntelligence/1.0" } });
       if (!response.ok) return [];
       const body = await response.text();
-      return feed.feed_type === "aihot"
-        ? parseAiHotCandidates(body)
-        : parseRssCandidates(body, feed.name);
+      if (feed.feed_type === "aihot") return parseAiHotCandidates(body);
+      if (feed.feed_type === "wechat_index") return parseWechatIndexCandidates(body, feed.name, feed.url);
+      if (feed.feed_type === "html_index") return parseHtmlIndexCandidates(body, feed.name, feed.url);
+      return parseRssCandidates(body, feed.name);
     } catch {
       return [];
     }
@@ -203,15 +207,24 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
     return true;
   });
   const verificationBatch = [
+    ...takeBalanced(unique.filter((candidate) => candidate.followed), 3, 15),
+    ...unique.filter((candidate) => candidate.discoveredVia === "source_feed").slice(0, 12),
     ...unique.filter((candidate) => candidate.discoveredVia === "aihot").slice(0, 6),
-    ...unique.filter((candidate) => candidate.discoveredVia === "source_feed").slice(0, 18),
   ];
-  return Promise.all(verificationBatch.map(async (candidate) => {
-    const excerpt = await fetchPublicSourceExcerpt(candidate.url, fetcher);
-    return excerpt.length >= 180
-      ? { ...candidate, excerpt, verificationStatus: "verified" as const }
-      : { ...candidate, verificationStatus: "lead" as const };
-  }));
+  return Promise.all(verificationBatch.map((candidate) => verifyCandidate(candidate, fetcher)));
+}
+
+function takeBalanced(candidates: Candidate[], maxPerPublisher: number, limit: number) {
+  const count = new Map<string, number>();
+  const selected: Candidate[] = [];
+  for (const candidate of candidates) {
+    const current = count.get(candidate.publisher) ?? 0;
+    if (current >= maxPerPublisher) continue;
+    count.set(candidate.publisher, current + 1);
+    selected.push(candidate);
+    if (selected.length >= limit) break;
+  }
+  return selected;
 }
 
 async function insertCandidate(db: D1Database, ownerId: string, candidate: Candidate) {
@@ -263,7 +276,8 @@ async function createDailyStory(
   cards: Array<CompiledCard & { id: string }>,
   config: InjectionConfig,
 ) {
-  const story = await compileStory(cards, config).catch(() => fallbackStory(cards));
+  const storyContext = await getStoryContext(db, ownerId, cards.map((card) => card.id));
+  const story = await compileStory(cards, config, storyContext).catch(() => fallbackStory(cards));
   const existing = await db.prepare("SELECT id FROM daily_stories WHERE owner_id = ? AND story_date = ? LIMIT 1")
     .bind(ownerId, storyDate).first<{ id: string }>();
   const storyId = existing?.id ?? crypto.randomUUID();
@@ -282,17 +296,26 @@ async function createDailyStory(
     await db.prepare("UPDATE knowledge_cards SET story_id = ?, story_position = ? WHERE id = ? AND owner_id = ?")
       .bind(storyId, index + 1, cardId, ownerId).run();
   }
+  await db.prepare(`
+    INSERT INTO wiki_activity (id, owner_id, action, message, metadata)
+    VALUES (?, ?, 'story_path', ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    ownerId,
+    `从 ${finalOrder.length} 个可追溯知识页编排今日故事「${story.title}」`,
+    JSON.stringify({ storyId, cardIds: finalOrder }),
+  ).run();
 }
 
 async function compileRawSource(source: RawRow, config: InjectionConfig) {
   const sourceText = source.raw_excerpt || source.content;
-  const response = await callDeepSeek(config, `你是知识卡编译器。只根据给定来源生成一张中文知识卡，不得补充来源没有表达的事实。输出 json，字段为 title、hook、explanation、reasoningMove、boundary、whyItMatters、tags。tags 是 1-3 个短中文主题。\n\n来源标题：${source.source_title}\n来源：${source.source_url}\n文本：${sourceText}`);
+  const response = await callDeepSeek(config, `你是知识卡编译器。只根据给定来源生成一张中文知识卡，不得补充来源没有表达的事实。输出 json，字段为 title、hook、explanation、reasoningMove、boundary、whyItMatters、tags。tags 是 1-3 个短中文主题。title 必须是可被跨来源复用和检索的主张，而不是吸引点击的标题。\n\n来源标题：${source.source_title}\n来源：${source.source_url}\n文本：${sourceText}`);
   return parseCompiledCard(response);
 }
 
-async function compileStory(cards: Array<CompiledCard & { id: string }>, config: InjectionConfig) {
+async function compileStory(cards: Array<CompiledCard & { id: string }>, config: InjectionConfig, wikiContext: string) {
   const compact = cards.map((card) => ({ id: card.id, title: card.title, hook: card.hook, reasoningMove: card.reasoningMove }));
-  const response = await callDeepSeek(config, `基于下列知识卡编排一个中文今日故事。输出 json，字段为 title、openingQuestion、takeaway、order。order 必须是所有卡片 id 的数组，按从问题到收束的顺序排列。\n${JSON.stringify(compact)}`);
+  const response = await callDeepSeek(config, `你在编排持久 Wiki 上的一条阅读路径，而不是给卡片排序。基于下列知识卡与它们已有的 Wiki 关系，编排一个中文今日故事。开场先提出一个真实问题，中间每张卡只承担一个递进动作，最后给出可被带进工作的判断。不得把“related_to”写成因果、支持或冲突；缺少证据时保留不确定性。输出 json，字段为 title、openingQuestion、takeaway、order。order 必须是所有卡片 id 的数组，按从问题到收束的顺序排列。\n\n知识卡：${JSON.stringify(compact)}\n\nWiki 关系：${wikiContext}`);
   const parsed = JSON.parse(response);
   if (!parsed?.title || !parsed?.openingQuestion || !parsed?.takeaway || !Array.isArray(parsed?.order)) throw new Error("story json is incomplete");
   return {
@@ -301,6 +324,25 @@ async function compileStory(cards: Array<CompiledCard & { id: string }>, config:
     takeaway: String(parsed.takeaway).slice(0, 500),
     order: parsed.order.filter((id: unknown) => typeof id === "string"),
   };
+}
+
+async function getStoryContext(db: D1Database, ownerId: string, cardIds: string[]) {
+  if (!cardIds.length) return "[]";
+  const placeholders = cardIds.map(() => "?").join(",");
+  const pages = await db.prepare(`
+    SELECT c.id AS cardId, p.id AS pageId, p.title, p.summary
+    FROM knowledge_cards c
+    LEFT JOIN wiki_pages p ON p.id = c.wiki_page_id AND p.owner_id = c.owner_id
+    WHERE c.owner_id = ? AND c.id IN (${placeholders})
+  `).bind(ownerId, ...cardIds).all<{ cardId: string; pageId: string | null; title: string | null; summary: string | null }>();
+  const pageIds = (pages.results ?? []).map((page) => page.pageId).filter((id): id is string => Boolean(id));
+  if (!pageIds.length) return JSON.stringify(pages.results ?? []);
+  const links = await db.prepare(`
+    SELECT from_page_id AS fromPageId, to_page_id AS toPageId, relation, rationale
+    FROM wiki_links WHERE owner_id = ? AND (from_page_id IN (${pageIds.map(() => "?").join(",")}) OR to_page_id IN (${pageIds.map(() => "?").join(",")}))
+    LIMIT 40
+  `).bind(ownerId, ...pageIds, ...pageIds).all<{ fromPageId: string; toPageId: string; relation: string; rationale: string }>();
+  return JSON.stringify({ pages: pages.results ?? [], links: links.results ?? [] });
 }
 
 async function callDeepSeek(config: InjectionConfig, prompt: string) {
@@ -361,6 +403,7 @@ export function parseAiHotCandidates(body: string): Candidate[] {
       verificationStatus: "lead" as const,
       sourceType: "article" as const,
       discoveredVia: "aihot" as const,
+      followed: false,
     }];
   });
 }
@@ -381,8 +424,96 @@ export function parseRssCandidates(body: string, publisher: string): Candidate[]
       verificationStatus: "verified" as const,
       sourceType: "article" as const,
       discoveredVia: "source_feed" as const,
+      followed: false,
     }];
   });
+}
+
+export function parseWechatIndexCandidates(body: string, publisher: string, indexUrl: string): Candidate[] {
+  const base = new URL(indexUrl);
+  const byUrl = new Map<string, Candidate>();
+  for (const match of body.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = resolvePublicUrl(match[1], base);
+    const title = cleanSnippet(match[2], 280);
+    if (!url || !/\/t\/[A-Za-z0-9]+/i.test(new URL(url).pathname) || title.length < 5) continue;
+    byUrl.set(url, {
+      title,
+      url,
+      excerpt: "",
+      publisher,
+      publishedAt: "",
+      verificationStatus: "lead",
+      sourceType: "article",
+      discoveredVia: "wechat_index",
+      followed: true,
+    });
+  }
+  return [...byUrl.values()].slice(0, 5);
+}
+
+export function parseHtmlIndexCandidates(body: string, publisher: string, indexUrl: string): Candidate[] {
+  const base = new URL(indexUrl);
+  const byUrl = new Map<string, Candidate>();
+  const articles = body.match(/<article\b[\s\S]*?<\/article>/gi) ?? [];
+  for (const article of articles) {
+    const publishedAt = article.match(/datetime=["']([^"']+)["']/i)?.[1] ?? "";
+    if (publishedAt && !isRecentPublication(publishedAt)) continue;
+    for (const match of article.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      const url = resolvePublicUrl(match[1], base);
+      const title = cleanSnippet(match[2], 280);
+      if (!url || title.length < 8) continue;
+      const parsed = new URL(url);
+      if (parsed.origin !== base.origin || parsed.pathname === "/" || /\/(tag|category|author|page)\//.test(parsed.pathname)) continue;
+      byUrl.set(url, {
+        title,
+        url,
+        excerpt: "",
+        publisher,
+        publishedAt,
+        verificationStatus: "lead",
+        sourceType: "article",
+        discoveredVia: "source_feed",
+        followed: true,
+      });
+    }
+  }
+  return [...byUrl.values()].slice(0, 5);
+}
+
+async function verifyCandidate(candidate: Candidate, fetcher: typeof fetch) {
+  if (candidate.discoveredVia === "wechat_index") {
+    const originalUrl = await resolveWechatOriginalUrl(candidate.url, fetcher);
+    if (!originalUrl) return { ...candidate, verificationStatus: "lead" as const };
+    const excerpt = await fetchPublicSourceExcerpt(originalUrl, fetcher);
+    return excerpt.length >= 180
+      ? { ...candidate, url: originalUrl, excerpt, verificationStatus: "verified" as const }
+      : { ...candidate, verificationStatus: "lead" as const };
+  }
+  const excerpt = await fetchPublicSourceExcerpt(candidate.url, fetcher);
+  return excerpt.length >= 180
+    ? { ...candidate, excerpt, verificationStatus: "verified" as const }
+    : { ...candidate, verificationStatus: "lead" as const };
+}
+
+async function resolveWechatOriginalUrl(indexArticleUrl: string, fetcher: typeof fetch) {
+  try {
+    const response = await fetcher(indexArticleUrl, {
+      headers: { "user-agent": "ThinkingIntelligence/1.0" },
+      redirect: "follow",
+    });
+    if (!response.ok) return "";
+    const body = decodeHtmlEntities(await response.text());
+    const direct = body.match(/https?:\/\/mp\.weixin\.qq\.com\/s\?[^\s"'<>]+/i)?.[0];
+    if (direct && isPublicHttpUrl(direct)) return direct;
+    for (const match of body.matchAll(/href=["']([^"']+)["']/gi)) {
+      const value = decodeHtmlEntities(match[1]);
+      const url = resolvePublicUrl(value, new URL(indexArticleUrl));
+      if (url && new URL(url).hostname === "mp.weixin.qq.com") return url;
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 export async function fetchPublicSourceExcerpt(value: string, fetcher: typeof fetch = fetch) {
@@ -432,6 +563,27 @@ function cleanSnippet(value: string, limit = MAX_RAW_EXCERPT) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, limit);
+}
+
+function resolvePublicUrl(value: string, base: URL) {
+  try {
+    const url = new URL(decodeHtmlEntities(value), base);
+    return isPublicHttpUrl(url.toString()) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"');
+}
+
+function isRecentPublication(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) || timestamp >= Date.now() - 32 * 86_400_000;
 }
 
 function canonicalUrl(value: string) {

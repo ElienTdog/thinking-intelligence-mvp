@@ -3,6 +3,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { clips, dailyStories, judgmentDeltas, knowledgeCards, materials, questions } from "../../../db/schema";
 import { chinaDate, ensureKnowledgeWorkspace } from "../../lib/knowledge-workspace";
+import { ensureWikiForCards, getWikiSnapshot } from "../../lib/wiki";
 import { requireApiUser } from "../auth";
 
 export async function GET() {
@@ -11,6 +12,7 @@ export async function GET() {
 
   const db = getDb();
   await ensureKnowledgeWorkspace(env.DB, auth.user.userId);
+  await ensureWikiForCards(env.DB, auth.user.userId);
   const [questionRows, materialRows, deltaRows, clipRows] = await Promise.all([
     db.select().from(questions).where(eq(questions.ownerId, auth.user.userId)).orderBy(asc(questions.priority), desc(questions.createdAt)),
     db.select().from(materials).where(eq(materials.ownerId, auth.user.userId)).orderBy(desc(materials.createdAt)),
@@ -31,6 +33,7 @@ export async function GET() {
       .where(and(eq(knowledgeCards.ownerId, auth.user.userId), eq(knowledgeCards.storyId, todayStory.id)))
       .orderBy(asc(knowledgeCards.storyPosition))
     : [];
+  const wiki = await getWikiSnapshot(env.DB, auth.user.userId);
   return Response.json({
     questions: questionRows,
     materials: materialRows,
@@ -39,5 +42,6 @@ export async function GET() {
     cards: cardRows,
     todayStory,
     storyCards,
+    wiki,
   });
 }
