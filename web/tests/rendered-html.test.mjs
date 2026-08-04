@@ -78,7 +78,7 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
 });
 
 test("declares the owner-scoped feed and daily injection surfaces", async () => {
-  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute] = await Promise.all([
+  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiModel, wikiSchema] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_exotic_whirlwind.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/knowledge-workspace.ts", import.meta.url), "utf8"),
@@ -90,6 +90,8 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/wiki/lint/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/wiki.ts", import.meta.url), "utf8"),
+    readFile(new URL("../LLM_WIKI_SCHEMA.md", import.meta.url), "utf8"),
   ]);
   assert.match(schema, /source_feeds/);
   assert.match(schema, /knowledge_cards/);
@@ -124,6 +126,11 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(knowledgeFeed, /ReviewMomentView/);
   assert.match(knowledgeFeed, /在 Wiki 里/);
   assert.match(wikiRoute, /getWikiLint/);
+  assert.match(wikiModel, /refreshTopicIndexes/);
+  assert.match(wikiModel, /supports.*contradicts|contradicts.*supports/);
+  assert.match(wikiSchema, /Raw layer/);
+  assert.match(wikiSchema, /Story Mode/);
+  assert.match(wikiSchema, /append-only/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

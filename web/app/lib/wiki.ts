@@ -55,6 +55,7 @@ export async function ensureWikiForCards(db: D1Database, ownerId: string) {
     LIMIT 80
   `).bind(ownerId).all<CardForWiki>();
   for (const card of result.results ?? []) await createWikiPageForCard(db, ownerId, card);
+  await refreshTopicIndexes(db, ownerId);
 }
 
 export async function getWikiSnapshot(db: D1Database, ownerId: string) {
@@ -193,6 +194,39 @@ async function getOrCreateTopicPage(db: D1Database, ownerId: string, title: stri
     `).bind(crypto.randomUUID(), ownerId, id, `建立主题索引「${title}」`),
   ]);
   return id;
+}
+
+async function refreshTopicIndexes(db: D1Database, ownerId: string) {
+  const topics = await db.prepare(`
+    SELECT id, title, summary, version FROM wiki_pages
+    WHERE owner_id = ? AND kind = 'topic'
+  `).bind(ownerId).all<{ id: string; title: string; summary: string; version: number }>();
+
+  for (const topic of topics.results ?? []) {
+    const linked = await db.prepare(`
+      SELECT p.title
+      FROM wiki_links l
+      JOIN wiki_pages p ON p.id = l.from_page_id
+      WHERE l.owner_id = ? AND l.to_page_id = ? AND l.relation = 'about' AND p.kind = 'claim'
+      ORDER BY p.updated_at DESC
+      LIMIT 4
+    `).bind(ownerId, topic.id).all<{ title: string }>();
+    const titles = linked.results?.map((page) => page.title) ?? [];
+    const nextSummary = titles.length
+      ? `这个主题当前串联 ${titles.length} 个可追溯知识页：${titles.join("；")}。它们是阅读入口，不自动构成彼此支持或冲突。`
+      : `围绕「${topic.title}」积累的可追溯知识页。`;
+    if (topic.summary === nextSummary) continue;
+    await db.batch([
+      db.prepare(`
+        UPDATE wiki_pages SET summary = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND owner_id = ?
+      `).bind(nextSummary, topic.version + 1, topic.id, ownerId),
+      db.prepare(`
+        INSERT INTO wiki_activity (id, owner_id, page_id, action, message)
+        VALUES (?, ?, ?, 'indexed', ?)
+      `).bind(crypto.randomUUID(), ownerId, topic.id, `更新主题索引「${topic.title}」，串联 ${titles.length} 个知识页`),
+    ]);
+  }
 }
 
 async function linkOnce(
