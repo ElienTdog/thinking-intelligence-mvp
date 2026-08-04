@@ -54,6 +54,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [practice, setPractice] = useState<{ pageId: string; promptType: LearningPromptType } | null>(null);
   const [showWiki, setShowWiki] = useState(false);
   const [wikiLint, setWikiLint] = useState<WikiLint | null>(null);
+  const [wikiQueryResult, setWikiQueryResult] = useState<WikiPage | null>(null);
   const captureFromLinkStarted = useRef(false);
   const touchStart = useRef<{ x: number; y: number; at: number } | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
@@ -198,6 +199,17 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       .then((result) => setWikiLint(result as WikiLint))
       .catch((error) => setNotice(error instanceof Error ? error.message : "暂时无法检查 Wiki"));
   }, []);
+
+  const askWiki = useCallback(async (question: string) => {
+    try {
+      const result = await requestJson("/api/wiki/query", { question }) as { page: WikiPage };
+      setWikiQueryResult(result.page);
+      setNotice("回答已写入 Wiki。它保留了可回看的来源关系。");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Wiki 暂时无法回答这个问题");
+    }
+  }, [load]);
 
   async function captureClipboard() {
     if (!navigator.clipboard?.readText) {
@@ -347,7 +359,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     />}
     {linkingCard && <QuestionBridge card={linkingCard} questions={data.questions} onClose={() => setLinkingCard(null)} onSelect={(question) => void connectToQuestion(question)} onCreate={(title, initialJudgment) => void createQuestion(title, initialJudgment)} />}
     {practice && practicePage && <PracticeSheet key={`${practicePage.id}:${practice.promptType}`} page={practicePage} initialPromptType={practice.promptType} onClose={() => setPractice(null)} onSubmit={(promptType, response) => void savePractice(practicePage.id, promptType, response)} />}
-    {showWiki && <WikiSheet pages={data.wiki.pages} activity={data.wiki.activity} lint={wikiLint} onClose={() => setShowWiki(false)} />}
+    {showWiki && <WikiSheet pages={data.wiki.pages} activity={data.wiki.activity} lint={wikiLint} queryResult={wikiQueryResult} onAsk={(question) => void askWiki(question)} onClose={() => setShowWiki(false)} />}
   </main>;
 }
 
@@ -426,17 +438,25 @@ function PracticeSheet({ page, initialPromptType, onClose, onSubmit }: {
   </section>;
 }
 
-function WikiSheet({ pages, activity, lint, onClose }: {
+function WikiSheet({ pages, activity, lint, queryResult, onAsk, onClose }: {
   pages: WikiPage[];
   activity: BootstrapPayload["wiki"]["activity"];
   lint: WikiLint | null;
+  queryResult: WikiPage | null;
+  onAsk: (question: string) => void;
   onClose: () => void;
 }) {
   const topics = pages.filter((page) => page.kind === "topic").slice(0, 18);
   const issueCount = (lint?.orphaned.length ?? 0) + (lint?.missingSources.length ?? 0) + (lint?.unverified.length ?? 0);
+  const [question, setQuestion] = useState("");
   return <section className="wiki-sheet" role="dialog" aria-modal="true" aria-label="知识索引">
     <div className="sheet-handle" />
     <div className="sheet-head"><div><p>Wiki</p><span>{pages.filter((page) => page.kind === "claim").length} 个知识页，{topics.length} 个主题索引</span></div><button onClick={onClose} aria-label="关闭知识索引">×</button></div>
+    <form className="wiki-query" onSubmit={(event) => { event.preventDefault(); if (!question.trim()) return; onAsk(question); setQuestion(""); }}>
+      <label htmlFor="wiki-question">问 Wiki</label>
+      <div><input id="wiki-question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={500} placeholder="这些观点之间，我应该如何判断？" /><button>提问</button></div>
+    </form>
+    {queryResult && <section className="wiki-sheet-section wiki-answer"><p>{queryResult.title}</p><strong>{queryResult.summary}</strong><span>这张综合页已经进入索引和变更日志，可继续回到关联知识页核验。</span></section>}
     <section className="wiki-sheet-section"><p>索引</p><div className="wiki-topic-list">{topics.length ? topics.map((topic) => <span key={topic.id}>{topic.title}</span>) : <span>等待第一张知识页</span>}</div></section>
     <section className="wiki-sheet-section"><p>最近变动</p>{activity.length ? <ul>{activity.slice(0, 6).map((item) => <li key={item.id}>{item.message}</li>)}</ul> : <span>还没有变动记录。</span>}</section>
     <section className="wiki-sheet-section"><p>自检</p><strong>{lint ? issueCount ? `${issueCount} 项需要回看` : "当前关系与来源完整" : "正在检查来源与关系"}</strong>{lint && issueCount > 0 && <span>未核验 {lint.unverified.length}，缺少来源 {lint.missingSources.length}，孤立页 {lint.orphaned.length}</span>}</section>

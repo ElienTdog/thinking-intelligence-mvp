@@ -58,7 +58,7 @@ export type KnowledgeCard = {
 
 export type WikiPage = {
   id: string;
-  kind: "claim" | "topic";
+  kind: "claim" | "topic" | "synthesis";
   title: string;
   summary: string;
   evidenceStatus: string;

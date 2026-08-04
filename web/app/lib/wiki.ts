@@ -12,7 +12,7 @@ type CardForWiki = {
 
 export type WikiPageRecord = {
   id: string;
-  kind: "claim" | "topic";
+  kind: "claim" | "topic" | "synthesis";
   title: string;
   summary: string;
   evidenceStatus: string;
@@ -44,6 +44,11 @@ export type ReviewMoment = {
   page: WikiPageRecord;
   cardId: string;
   promptType: "recall" | "transfer" | "counter";
+};
+
+export type WikiQueryResult = {
+  page: WikiPageRecord;
+  relatedPageIds: string[];
 };
 
 export async function ensureWikiForCards(db: D1Database, ownerId: string) {
@@ -87,18 +92,18 @@ export async function getWikiLint(db: D1Database, ownerId: string) {
   const [orphaned, missingSources, unverified] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.title FROM wiki_pages p
-      WHERE p.owner_id = ? AND p.kind = 'claim'
+      WHERE p.owner_id = ? AND p.kind IN ('claim', 'synthesis')
         AND NOT EXISTS (SELECT 1 FROM wiki_links l WHERE l.owner_id = p.owner_id AND (l.from_page_id = p.id OR l.to_page_id = p.id))
       ORDER BY p.updated_at DESC LIMIT 12
     `).bind(ownerId).all<{ id: string; title: string }>(),
     db.prepare(`
       SELECT p.id, p.title FROM wiki_pages p
-      WHERE p.owner_id = ? AND p.kind = 'claim'
+      WHERE p.owner_id = ? AND p.kind IN ('claim', 'synthesis')
         AND NOT EXISTS (SELECT 1 FROM wiki_page_sources s WHERE s.owner_id = p.owner_id AND s.page_id = p.id)
       ORDER BY p.updated_at DESC LIMIT 12
     `).bind(ownerId).all<{ id: string; title: string }>(),
     db.prepare(`
-      SELECT id, title FROM wiki_pages WHERE owner_id = ? AND kind = 'claim' AND evidence_status <> 'verified'
+      SELECT id, title FROM wiki_pages WHERE owner_id = ? AND kind IN ('claim', 'synthesis') AND evidence_status <> 'verified'
       ORDER BY updated_at DESC LIMIT 12
     `).bind(ownerId).all<{ id: string; title: string }>(),
   ]);
@@ -136,6 +141,74 @@ export async function recordLearningAttempt(
     `).bind(crypto.randomUUID(), ownerId, page.id, `你用${promptLabel(promptType)}回应了「${page.title}」`),
   ]);
   return { nextReviewAt };
+}
+
+export async function queryWiki(
+  db: D1Database,
+  ownerId: string,
+  question: string,
+  config: { apiKey?: string; model?: string; fetcher?: typeof fetch },
+): Promise<WikiQueryResult | null> {
+  if (!config.apiKey) throw new Error("DEEPSEEK_API_KEY is not configured");
+  await ensureWikiForCards(db, ownerId);
+  const pages = await db.prepare(`
+    SELECT id, kind, title, summary, evidence_status AS evidenceStatus, recall_prompt AS recallPrompt,
+      transfer_prompt AS transferPrompt, version, created_at AS createdAt, updated_at AS updatedAt
+    FROM wiki_pages WHERE owner_id = ? AND kind IN ('claim', 'topic')
+    ORDER BY updated_at DESC LIMIT 96
+  `).bind(ownerId).all<WikiPageRecord>();
+  const candidates = rankWikiPages(question, pages.results ?? []).slice(0, 10);
+  if (!candidates.length) return null;
+
+  const response = await callWikiModel(config, `你是私有 Wiki 的查询助手。只使用提供的知识页回答问题；它们共享主题不等于互相支持或冲突。输出 json，字段为 title、answer、caveat、pageIds。pageIds 必须是参考到的知识页 id，最多 6 个。\n\n问题：${question}\n\n可用知识页：${JSON.stringify(candidates.map((page) => ({ id: page.id, title: page.title, summary: page.summary, evidenceStatus: page.evidenceStatus })))}`);
+  const parsed = JSON.parse(response) as { title?: unknown; answer?: unknown; caveat?: unknown; pageIds?: unknown };
+  const title = String(parsed.title ?? "").trim().slice(0, 160);
+  const answer = String(parsed.answer ?? "").trim().slice(0, 2_400);
+  const caveat = String(parsed.caveat ?? "").trim().slice(0, 800);
+  const candidateIds = new Set(candidates.map((page) => page.id));
+  const relatedPageIds = Array.isArray(parsed.pageIds)
+    ? [...new Set(parsed.pageIds.filter((id): id is string => typeof id === "string" && candidateIds.has(id)))].slice(0, 6)
+    : [];
+  if (!title || !answer || !relatedPageIds.length) throw new Error("Wiki 查询没有返回可追溯答案");
+
+  const page: WikiPageRecord = {
+    id: crypto.randomUUID(),
+    kind: "synthesis",
+    title: `问答：${title}`,
+    summary: caveat ? `${answer}\n\n保留：${caveat}` : answer,
+    evidenceStatus: "derived",
+    recallPrompt: "",
+    transferPrompt: "",
+    version: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const rawSources = await sourcesForPages(db, ownerId, relatedPageIds);
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`
+      INSERT INTO wiki_pages
+        (id, owner_id, kind, title, summary, evidence_status, recall_prompt, transfer_prompt, version, updated_at)
+      VALUES (?, ?, 'synthesis', ?, ?, 'derived', '', '', 1, CURRENT_TIMESTAMP)
+    `).bind(page.id, ownerId, page.title, page.summary),
+    db.prepare(`
+      INSERT INTO wiki_activity (id, owner_id, page_id, action, message, metadata)
+      VALUES (?, ?, ?, 'queried', ?, ?)
+    `).bind(crypto.randomUUID(), ownerId, page.id, `把问题「${question}」沉淀为综合页「${page.title}」`, JSON.stringify({ relatedPageIds })),
+  ];
+  for (const relatedPageId of relatedPageIds) {
+    statements.push(db.prepare(`
+      INSERT INTO wiki_links (id, owner_id, from_page_id, to_page_id, relation, rationale)
+      VALUES (?, ?, ?, ?, 'related_to', ?)
+    `).bind(crypto.randomUUID(), ownerId, page.id, relatedPageId, "这张综合页引用该知识页；请回到对应来源核验细节"));
+  }
+  for (const rawSourceId of rawSources) {
+    statements.push(db.prepare(`
+      INSERT INTO wiki_page_sources (id, owner_id, page_id, raw_source_id, contribution)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), ownerId, page.id, rawSourceId, `回答问题：${question}`));
+  }
+  await db.batch(statements);
+  return { page, relatedPageIds };
 }
 
 async function createWikiPageForCard(db: D1Database, ownerId: string, card: CardForWiki) {
@@ -229,6 +302,15 @@ async function refreshTopicIndexes(db: D1Database, ownerId: string) {
   }
 }
 
+async function sourcesForPages(db: D1Database, ownerId: string, pageIds: string[]) {
+  if (!pageIds.length) return [];
+  const result = await db.prepare(`
+    SELECT DISTINCT raw_source_id AS rawSourceId FROM wiki_page_sources
+    WHERE owner_id = ? AND page_id IN (${pageIds.map(() => "?").join(",")})
+  `).bind(ownerId, ...pageIds).all<{ rawSourceId: string }>();
+  return result.results?.map((source) => source.rawSourceId) ?? [];
+}
+
 async function linkOnce(
   db: D1Database,
   ownerId: string,
@@ -280,4 +362,35 @@ function promptLabel(promptType: ReviewMoment["promptType"]) {
   if (promptType === "transfer") return "迁移";
   if (promptType === "counter") return "反驳";
   return "复述";
+}
+
+function rankWikiPages(question: string, pages: WikiPageRecord[]) {
+  const terms = [...new Set(question.replace(/\s+/g, "").split("").filter((term) => term.length > 0))];
+  return pages
+    .map((page) => ({ page, score: terms.reduce((score, term) => score + Number(`${page.title}${page.summary}`.includes(term)), 0) + (page.kind === "claim" ? 1 : 0) }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || right.page.updatedAt.localeCompare(left.page.updatedAt))
+    .map(({ page }) => page);
+}
+
+async function callWikiModel(config: { apiKey?: string; model?: string; fetcher?: typeof fetch }, prompt: string) {
+  const response = await (config.fetcher ?? fetch)("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify({
+      model: config.model || "deepseek-v4-flash",
+      messages: [
+        { role: "system", content: "你输出有效 json。答案必须可追溯到提供的 Wiki 知识页，不确定时明确保留。" },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+      thinking: { type: "disabled" },
+      stream: false,
+    }),
+  });
+  if (!response.ok) throw new Error(`DeepSeek request failed (${response.status})`);
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) throw new Error("DeepSeek returned empty json");
+  return content;
 }

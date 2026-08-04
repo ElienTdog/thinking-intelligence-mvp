@@ -78,6 +78,12 @@ export function validateLearningAttemptPayload(payload) {
   return { value: { pageId, promptType, response } };
 }
 
+export function validateWikiQueryPayload(payload) {
+  const question = cleanText(payload?.question, 500);
+  if (!question) return { error: "question is required" };
+  return { value: { question } };
+}
+
 export function isCompilableRawSource(source) {
   const content = cleanText(source?.content, MAX_CAPTURE_TEXT);
   if (!content || /^\[?URL(?:\]|\b)/i.test(content)) return false;

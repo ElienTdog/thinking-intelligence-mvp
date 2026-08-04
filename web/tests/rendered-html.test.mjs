@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { canWriteDelta, isCompilableRawSource, rankKnowledgeCards, validateClipPayload, validateDeltaPayload, validateFeedEventPayload, validateLearningAttemptPayload } from "../app/lib/validation.mjs";
+import { canWriteDelta, isCompilableRawSource, rankKnowledgeCards, validateClipPayload, validateDeltaPayload, validateFeedEventPayload, validateLearningAttemptPayload, validateWikiQueryPayload } from "../app/lib/validation.mjs";
 
 
 test("declares the private Alpha sign-in boundary", async () => {
@@ -66,6 +66,11 @@ test("requires a real page and user response for a recall attempt", () => {
   );
 });
 
+test("requires a real question before filing a Wiki query", () => {
+  assert.ok(validateWikiQueryPayload({ question: "" }).error);
+  assert.deepEqual(validateWikiQueryPayload({ question: "这和我正在做的产品有什么关系？" }).value, { question: "这和我正在做的产品有什么关系？" });
+});
+
 test("ranks unseen cards ahead of muted cards and validates feedback", () => {
   const cards = [
     { id: "new", tags: '["AI"]', createdAt: new Date().toISOString(), storyId: null },
@@ -78,7 +83,7 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
 });
 
 test("declares the owner-scoped feed and daily injection surfaces", async () => {
-  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiModel, wikiSchema] = await Promise.all([
+  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_exotic_whirlwind.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/knowledge-workspace.ts", import.meta.url), "utf8"),
@@ -90,6 +95,7 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/wiki/lint/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/wiki/query/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/wiki.ts", import.meta.url), "utf8"),
     readFile(new URL("../LLM_WIKI_SCHEMA.md", import.meta.url), "utf8"),
   ]);
@@ -117,6 +123,7 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(dashboard, /onTouchMove/);
   assert.match(dashboard, /\/api\/learning-attempts/);
   assert.match(dashboard, /\/api\/wiki\/lint/);
+  assert.match(dashboard, /\/api\/wiki\/query/);
   assert.match(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
   assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
   assert.match(deleteRoute, /knowledgeCards\.ownerId/);
@@ -126,6 +133,7 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(knowledgeFeed, /ReviewMomentView/);
   assert.match(knowledgeFeed, /在 Wiki 里/);
   assert.match(wikiRoute, /getWikiLint/);
+  assert.match(wikiQueryRoute, /queryWiki/);
   assert.match(wikiModel, /refreshTopicIndexes/);
   assert.match(wikiModel, /supports.*contradicts|contradicts.*supports/);
   assert.match(wikiSchema, /Raw layer/);
