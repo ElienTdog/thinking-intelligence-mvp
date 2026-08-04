@@ -226,7 +226,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
         <div><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1></div>
         <div className="panel-actions">
           <button className={isCapture ? "secondary" : "primary"} onClick={() => setActiveView("capture")}>收录</button>
-          {(activeView === "feed" || activeView === "story") && <button className="secondary" onClick={generateToday} disabled={isGenerating}>{isGenerating ? "生成中" : "生成今日内容"}</button>}
+          {(activeView === "feed" || activeView === "story") && <button className="secondary run-injection" onClick={generateToday} disabled={isGenerating}>{isGenerating ? "生成中" : "生成今日内容"}</button>}
           {selectedQuestion && !isKnowledgeView && <button className="secondary" onClick={() => setShowMaterialForm((visible) => !visible)}>添加材料</button>}
         </div>
       </header>
