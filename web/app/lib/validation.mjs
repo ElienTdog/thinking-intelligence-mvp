@@ -38,8 +38,79 @@ export function validateMaterialPayload(payload) {
 export function validateClipPayload(payload) {
   const content = cleanText(payload?.content, MAX_CAPTURE_TEXT);
   if (!content) return { error: "content is required" };
+  if (/^\[?URL(?:\]|\b)/i.test(content)) {
+    return { error: "快捷指令没有传入实际内容，请重新插入 URL 编码后的变量" };
+  }
   const sourceUrl = findHttpUrl(content);
   return { value: { content, sourceTitle: makeClipTitle(content, sourceUrl), sourceUrl } };
+}
+
+export const FEED_EVENT_TYPES = Object.freeze([
+  "seen",
+  "completed",
+  "saved",
+  "less_like",
+  "opened_source",
+]);
+
+export function validateFeedEventPayload(payload) {
+  const cardId = cleanText(payload?.cardId, MAX_SHORT_TEXT);
+  const eventType = cleanText(payload?.eventType, 30);
+  if (!cardId || !FEED_EVENT_TYPES.includes(eventType)) {
+    return { error: "cardId and a known eventType are required" };
+  }
+  return { value: { cardId, eventType } };
+}
+
+export function isCompilableRawSource(source) {
+  const content = cleanText(source?.content, MAX_CAPTURE_TEXT);
+  if (!content || /^\[?URL(?:\]|\b)/i.test(content)) return false;
+  if (source?.sourceType === "video" && !cleanText(source?.rawExcerpt, MAX_CAPTURE_TEXT)) return false;
+  return Boolean(cleanText(source?.rawExcerpt, MAX_CAPTURE_TEXT) || !source?.sourceUrl || source.sourceType === "text");
+}
+
+export function rankKnowledgeCards(cards, events) {
+  const eventMap = new Map();
+  for (const event of events) {
+    const current = eventMap.get(event.cardId) ?? [];
+    current.push(event.eventType);
+    eventMap.set(event.cardId, current);
+  }
+  const savedTags = new Set();
+  const mutedTags = new Set();
+  for (const card of cards) {
+    const types = eventMap.get(card.id) ?? [];
+    const tags = parseTags(card.tags);
+    if (types.includes("saved")) tags.forEach((tag) => savedTags.add(tag));
+    if (types.includes("less_like")) tags.forEach((tag) => mutedTags.add(tag));
+  }
+  return [...cards].sort((left, right) => scoreCard(right) - scoreCard(left));
+
+  function scoreCard(card) {
+    const types = eventMap.get(card.id) ?? [];
+    const tags = parseTags(card.tags);
+    let score = card.storyId ? 8 : 0;
+    if (!types.includes("seen")) score += 30;
+    if (!types.includes("completed")) score += 10;
+    if (types.includes("saved")) score += 18;
+    if (types.includes("opened_source")) score += 8;
+    if (types.includes("less_like")) score -= 100;
+    for (const tag of tags) {
+      if (savedTags.has(tag)) score += 9;
+      if (mutedTags.has(tag)) score -= 14;
+    }
+    const ageDays = Math.max(0, (Date.now() - new Date(card.createdAt).getTime()) / 86_400_000);
+    return score + Math.max(0, 12 - ageDays);
+  }
+}
+
+function parseTags(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((tag) => typeof tag === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function findHttpUrl(content) {

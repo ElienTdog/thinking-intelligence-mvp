@@ -1,9 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BootstrapPayload, Clip, JudgmentDelta, Material, Question } from "./lib/types";
+import { KnowledgeFeed } from "./knowledge-feed";
+import type { BootstrapPayload, Clip, FeedPayload, JudgmentDelta, KnowledgeCard, Material, Question } from "./lib/types";
 
-type View = "pending" | "questions" | "materials" | "deltas" | "capture";
+type View = "feed" | "story" | "raw" | "pending" | "questions" | "materials" | "deltas" | "capture";
 
 const responseLabels: Record<JudgmentDelta["responseType"], string> = {
   partially_accept: "部分接受",
@@ -41,7 +42,10 @@ function clipPreview(clip: Clip) {
 export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [data, setData] = useState<BootstrapPayload | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<View>("pending");
+  const [activeView, setActiveView] = useState<View>("feed");
+  const [feedCards, setFeedCards] = useState<KnowledgeCard[]>([]);
+  const [nextFeedCursor, setNextFeedCursor] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [showQuestionForm, setShowQuestionForm] = useState(false);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [respondingTo, setRespondingTo] = useState<Material | null>(null);
@@ -53,6 +57,14 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     try {
       const next = await requestJson("/api/bootstrap") as BootstrapPayload;
       setData(next);
+      try {
+        const feed = await requestJson("/api/feed?limit=8") as FeedPayload;
+        setFeedCards(feed.cards);
+        setNextFeedCursor(feed.nextCursor);
+      } catch {
+        setFeedCards(next.cards);
+        setNextFeedCursor(null);
+      }
       setSelectedQuestionId((current) => current && next.questions.some((item) => item.id === current)
         ? current : next.questions[0]?.id ?? null);
     } catch (error) {
@@ -63,9 +75,9 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const saveClip = useCallback(async (content: string) => {
     const value = content.trim();
     try {
-      await requestJson("/api/clips", { content: value });
+      const result = await requestJson("/api/clips", { content: value }) as { card?: { id: string } | null; duplicate?: boolean };
       setCaptureContent("");
-      setNotice("已收录到素材库。它还不是你的判断。");
+      setNotice(result.duplicate ? "这条来源已经在 Raw 层里了。" : result.card ? "已收录并编译成知识卡。" : "已收录到 Raw 层，等待可编译文本或每日注入。");
       await load();
     } catch (error) {
       setCaptureContent(value);
@@ -83,7 +95,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     if (!value || captureFromLinkStarted.current) return;
     captureFromLinkStarted.current = true;
     const timer = window.setTimeout(() => {
-      setActiveView("capture");
+      setActiveView("feed");
       void saveClip(value);
     }, 0);
     window.history.replaceState({}, "", window.location.pathname);
@@ -103,6 +115,34 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const needsValidation = deltas.filter((item) => item.status === "needs_validation");
   const unanswered = materials.filter((item) => !latestByMaterial.has(item.id));
   const queue = activeView === "pending" ? [...needsValidation.map((delta) => ({ kind: "delta" as const, delta })), ...unanswered.map((material) => ({ kind: "material" as const, material }))] : [];
+  const isKnowledgeView = activeView === "feed" || activeView === "story" || activeView === "raw" || activeView === "capture";
+
+  const recordFeedEvent = useCallback((cardId: string, eventType: "seen" | "completed" | "saved" | "less_like" | "opened_source") => {
+    if (eventType === "less_like") setFeedCards((current) => current.filter((card) => card.id !== cardId));
+    void requestJson("/api/feed-events", { cardId, eventType }).catch(() => undefined);
+  }, []);
+
+  const loadMoreFeed = useCallback(() => {
+    if (!nextFeedCursor) return;
+    void requestJson(`/api/feed?limit=8&cursor=${encodeURIComponent(nextFeedCursor)}`)
+      .then((payload) => {
+        const next = payload as FeedPayload;
+        setFeedCards((current) => [...current, ...next.cards.filter((card) => !current.some((item) => item.id === card.id))]);
+        setNextFeedCursor(next.nextCursor);
+      })
+      .catch((error) => setNotice(error instanceof Error ? error.message : "无法加载更多知识卡"));
+  }, [nextFeedCursor]);
+
+  const generateToday = useCallback(() => {
+    setIsGenerating(true);
+    void requestJson("/api/injection/run")
+      .then(async () => {
+        setNotice("今日 Raw、知识卡与故事已刷新。");
+        await load();
+      })
+      .catch((error) => setNotice(error instanceof Error ? error.message : "今日内容生成失败"))
+      .finally(() => setIsGenerating(false));
+  }, [load]);
 
   async function createQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -157,19 +197,19 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   if (!data) return <main className="loading" aria-busy="true"><div className="loading-stack"><span /><span /><span /></div><p>正在打开你的判断工作台</p></main>;
 
   const isCapture = activeView === "capture";
-  const heading = isCapture ? "收录" : selectedQuestion?.title ?? "从一个真实问题开始";
-  const eyebrow = isCapture ? "复制即知识" : activeView === "pending" ? "最小判断闭环" : "你的工作区";
+  const heading = activeView === "feed" ? "推荐" : activeView === "story" ? "今日故事" : activeView === "raw" ? "Raw" : isCapture ? "收录" : selectedQuestion?.title ?? "从一个真实问题开始";
+  const eyebrow = activeView === "feed" ? "AI 时代知识点" : activeView === "story" ? "问题到判断" : activeView === "raw" ? "来源、核验与编译" : isCapture ? "复制即知识" : activeView === "pending" ? "判断工作台" : "你的工作区";
 
   return <main className="workbench-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">↗</span><span>思考情报台</span></div>
       <p className="account">{displayName}</p>
       <nav className="desktop-nav" aria-label="工作台导航">
-        <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="待我判断" count={needsValidation.length + unanswered.length} />
+        <NavButton view="feed" activeView={activeView} onSelect={setActiveView} label="推荐" />
+        <NavButton view="story" activeView={activeView} onSelect={setActiveView} label="今日故事" />
         <NavButton view="capture" activeView={activeView} onSelect={setActiveView} label="收录素材" />
-        <NavButton view="questions" activeView={activeView} onSelect={setActiveView} label="问题" />
-        <NavButton view="materials" activeView={activeView} onSelect={setActiveView} label="素材库" count={clips.length} />
-        <NavButton view="deltas" activeView={activeView} onSelect={setActiveView} label="判断差分" />
+        <NavButton view="raw" activeView={activeView} onSelect={setActiveView} label="Raw" count={clips.length} />
+        <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="判断" count={needsValidation.length + unanswered.length} />
       </nav>
       <button className="secondary full" onClick={() => setShowQuestionForm((visible) => !visible)}>新问题</button>
       {showQuestionForm && <form className="compact-form sidebar-form" onSubmit={createQuestion}>
@@ -186,13 +226,17 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
         <div><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1></div>
         <div className="panel-actions">
           <button className={isCapture ? "secondary" : "primary"} onClick={() => setActiveView("capture")}>收录</button>
-          {selectedQuestion && !isCapture && <button className="secondary" onClick={() => setShowMaterialForm((visible) => !visible)}>添加材料</button>}
+          {(activeView === "feed" || activeView === "story") && <button className="secondary" onClick={generateToday} disabled={isGenerating}>{isGenerating ? "生成中" : "生成今日内容"}</button>}
+          {selectedQuestion && !isKnowledgeView && <button className="secondary" onClick={() => setShowMaterialForm((visible) => !visible)}>添加材料</button>}
         </div>
       </header>
       {notice && <p className="notice" role="status">{notice}</p>}
+      {activeView === "feed" && <KnowledgeFeed mode="feed" cards={feedCards} story={data.todayStory} storyCards={data.storyCards} rawClips={clips} hasMore={Boolean(nextFeedCursor)} isGenerating={isGenerating} onEvent={recordFeedEvent} onLoadMore={loadMoreFeed} onOpenStory={() => setActiveView("story")} onGenerateToday={generateToday} />}
+      {activeView === "story" && <KnowledgeFeed mode="story" cards={feedCards} story={data.todayStory} storyCards={data.storyCards} rawClips={clips} hasMore={false} isGenerating={isGenerating} onEvent={recordFeedEvent} onLoadMore={loadMoreFeed} onOpenStory={() => setActiveView("story")} onGenerateToday={generateToday} />}
       {isCapture && <CapturePanel content={captureContent} clips={clips} onContentChange={setCaptureContent} onCaptureClipboard={() => void captureClipboard()} onSubmit={createClip} />}
-      {!isCapture && !selectedQuestion && activeView !== "materials" && <div className="empty"><h2>先写下一个问题</h2><p>它不需要完整。写下你正在做判断的真实情境，再让材料来挑战它。</p><button className="primary" onClick={() => setShowQuestionForm(true)}>创建第一个问题</button></div>}
-      {showMaterialForm && selectedQuestion && !isCapture && <form className="material-form" onSubmit={createMaterial}>
+      {activeView === "raw" && <MaterialLibrary clips={clips} materials={[]} onCapture={() => setActiveView("capture")} />}
+      {!isKnowledgeView && !selectedQuestion && activeView !== "materials" && <div className="empty"><h2>先写下一个问题</h2><p>它不需要完整。写下你正在做判断的真实情境，再让材料来挑战它。</p><button className="primary" onClick={() => setShowQuestionForm(true)}>创建第一个问题</button></div>}
+      {showMaterialForm && selectedQuestion && !isKnowledgeView && <form className="material-form" onSubmit={createMaterial}>
         <div className="form-title">把一条材料放进这个问题</div>
         <div className="form-grid"><label>类型<select name="type" defaultValue="source"><option value="source">外部来源</option><option value="card">思考卡</option></select></label><label>标题<input name="title" required maxLength={280} placeholder="它在说什么？" /></label></div>
         <label>它带来的挑战<textarea name="challenge" required maxLength={2000} placeholder="它怎样不同意、限制或重写我的判断？" /></label>
@@ -216,24 +260,38 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     </section>
 
     <aside className="insight-panel">
+      {isKnowledgeView ? <FeedLens story={data.todayStory} cards={feedCards} clips={clips} /> : <>
       <p className="eyebrow">当前问题</p><h2>{selectedQuestion?.title ?? "未选择"}</h2>
       <section><p className="section-label">初始判断</p><p>{selectedQuestion?.initialJudgment ?? "先写下你的起点。"}</p></section>
       <section><p className="section-label">当前临时立场</p><p className="muted">尚未确认。这里不会由材料或 AI 自动写入。</p></section>
       <section><p className="section-label">判断差分</p><div className="stat-row"><strong>{unanswered.length}</strong><span>待回应</span></div><div className="stat-row"><strong>{needsValidation.length}</strong><span>待真实场景验证</span></div></section>
       {deltas[0] && <section><p className="section-label">最新记录</p><p className="delta-copy">{deltas[0].responseText}</p></section>}
+      </>}
     </aside>
 
     <nav className="mobile-nav" aria-label="移动端导航">
-      <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="待判断" count={needsValidation.length + unanswered.length} />
+      <NavButton view="feed" activeView={activeView} onSelect={setActiveView} label="推荐" />
+      <NavButton view="story" activeView={activeView} onSelect={setActiveView} label="故事" />
       <NavButton view="capture" activeView={activeView} onSelect={setActiveView} label="收录" />
-      <NavButton view="materials" activeView={activeView} onSelect={setActiveView} label="素材" count={clips.length} />
-      <NavButton view="questions" activeView={activeView} onSelect={setActiveView} label="问题" />
+      <NavButton view="raw" activeView={activeView} onSelect={setActiveView} label="Raw" count={clips.length} />
+      <NavButton view="pending" activeView={activeView} onSelect={setActiveView} label="判断" count={needsValidation.length + unanswered.length} />
     </nav>
   </main>;
 }
 
 function NavButton({ view, activeView, onSelect, label, count }: { view: View; activeView: View; onSelect: (view: View) => void; label: string; count?: number }) {
   return <button className={activeView === view ? "nav-active" : ""} onClick={() => onSelect(view)}>{label}{typeof count === "number" && <em>{count}</em>}</button>;
+}
+
+function FeedLens({ story, cards, clips }: { story: BootstrapPayload["todayStory"]; cards: KnowledgeCard[]; clips: Clip[] }) {
+  const queued = clips.filter((clip) => clip.processingStatus === "queued").length;
+  const skipped = clips.filter((clip) => clip.processingStatus === "skipped").length;
+  return <>
+    <p className="eyebrow">知识流</p><h2>{story?.title ?? "下一条知识，来自可追溯的来源"}</h2>
+    <section><p className="section-label">推荐池</p><div className="stat-row"><strong>{cards.length}</strong><span>可刷知识卡</span></div></section>
+    <section><p className="section-label">Raw 编译</p><div className="stat-row"><strong>{queued}</strong><span>等待编译</span></div><div className="stat-row"><strong>{skipped}</strong><span>停留在 Raw</span></div></section>
+    <section><p className="section-label">你的判断</p><p className="muted">知识卡不改写你的立场。需要时，把它作为材料带进判断工作台。</p></section>
+  </>;
 }
 
 function CapturePanel({ content, clips, onContentChange, onCaptureClipboard, onSubmit }: {
@@ -265,7 +323,15 @@ function MaterialLibrary({ clips, materials, onCapture }: { clips: Clip[]; mater
 }
 
 function ClipRow({ clip }: { clip: Clip }) {
-  return <article className="clip-row"><div className="clip-meta"><span>待整理</span>{clip.sourceUrl && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">打开来源</a>}</div><h3>{clipTitle(clip)}</h3><p>{clipPreview(clip)}</p></article>;
+  const statuses: Record<Clip["processingStatus"], string> = {
+    legacy: "旧收录",
+    queued: "等待编译",
+    processing: "正在编译",
+    compiled: "已编译",
+    skipped: clip.processingError || "停留在 Raw",
+    failed: clip.processingError || "编译失败",
+  };
+  return <article className="clip-row"><div className="clip-meta"><span>{statuses[clip.processingStatus]}</span>{clip.sourceUrl && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">打开来源</a>}</div><h3>{clipTitle(clip)}</h3><p>{clip.rawExcerpt || clipPreview(clip)}</p></article>;
 }
 
 function MaterialCard({ material, onRespond }: { material: Material; onRespond?: () => void }) {

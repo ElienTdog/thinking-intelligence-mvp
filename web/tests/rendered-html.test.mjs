@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { canWriteDelta, validateClipPayload, validateDeltaPayload } from "../app/lib/validation.mjs";
+import { canWriteDelta, isCompilableRawSource, rankKnowledgeCards, validateClipPayload, validateDeltaPayload, validateFeedEventPayload } from "../app/lib/validation.mjs";
 
 
 test("declares the private Alpha sign-in boundary", async () => {
@@ -37,6 +37,7 @@ test("requires a validation scenario for real-world verification", () => {
 
 test("captures raw material with generated metadata and no required form fields", async () => {
   assert.match(validateClipPayload({ content: "" }).error, /content/);
+  assert.match(validateClipPayload({ content: "[URL]" }).error, /快捷指令/);
   assert.deepEqual(
     validateClipPayload({ content: "https://www.example.com/post" }).value,
     { content: "https://www.example.com/post", sourceTitle: "example.com", sourceUrl: "https://www.example.com/post" },
@@ -48,6 +49,45 @@ test("captures raw material with generated metadata and no required form fields"
   const dashboard = await readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8");
   assert.match(dashboard, /收录剪贴板/);
   assert.doesNotMatch(dashboard, /标题（可选）|来源链接（可选）/);
+});
+
+test("keeps unverifiable and transcript-free raw sources out of the compiler", () => {
+  assert.equal(isCompilableRawSource({ content: "https://video.example", sourceUrl: "https://video.example", sourceType: "video", rawExcerpt: "" }), false);
+  assert.equal(isCompilableRawSource({ content: "https://article.example", sourceUrl: "https://article.example", sourceType: "article", rawExcerpt: "" }), false);
+  assert.equal(isCompilableRawSource({ content: "可靠的主动收录文本", sourceUrl: "", sourceType: "text", rawExcerpt: "可靠的主动收录文本" }), true);
+});
+
+test("ranks unseen cards ahead of muted cards and validates feedback", () => {
+  const cards = [
+    { id: "new", tags: '["AI"]', createdAt: new Date().toISOString(), storyId: null },
+    { id: "muted", tags: '["AI"]', createdAt: new Date().toISOString(), storyId: null },
+  ];
+  const ranked = rankKnowledgeCards(cards, [{ cardId: "muted", eventType: "less_like" }]);
+  assert.equal(ranked[0].id, "new");
+  assert.ok(validateFeedEventPayload({ cardId: "card", eventType: "saved" }).value);
+  assert.ok(validateFeedEventPayload({ cardId: "card", eventType: "invented" }).error);
+});
+
+test("declares the owner-scoped feed and daily injection surfaces", async () => {
+  const [schema, worker, feedRoute, eventRoute, runRoute, dashboard] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feed-events/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/injection/run/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(schema, /source_feeds/);
+  assert.match(schema, /knowledge_cards/);
+  assert.match(schema, /feed_events/);
+  assert.match(schema, /injection_runs/);
+  assert.match(worker, /scheduled\(/);
+  assert.match(worker, /runDailyInjection/);
+  assert.match(feedRoute, /knowledgeCards\.ownerId/);
+  assert.match(eventRoute, /knowledgeCards\.ownerId/);
+  assert.match(runRoute, /DEEPSEEK_API_KEY/);
+  assert.match(dashboard, /KnowledgeFeed/);
+  assert.match(dashboard, /今日故事/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {
