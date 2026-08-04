@@ -69,12 +69,13 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
 });
 
 test("declares the owner-scoped feed and daily injection surfaces", async () => {
-  const [schema, worker, feedRoute, eventRoute, runRoute, dashboard] = await Promise.all([
+  const [schema, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feed-events/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/injection/run/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clips/[clipId]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(schema, /source_feeds/);
@@ -87,8 +88,13 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(eventRoute, /knowledgeCards\.ownerId/);
   assert.match(runRoute, /DEEPSEEK_API_KEY/);
   assert.match(dashboard, /KnowledgeFeed/);
-  assert.match(dashboard, /今日故事/);
+  assert.match(dashboard, /onTouchEnd/);
+  assert.match(dashboard, /setSurface\(direction === "left" \? "story" : "raw"\)/);
   assert.match(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
+  assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
+  assert.match(deleteRoute, /knowledgeCards\.ownerId/);
+  assert.match(deleteRoute, /feedEvents/);
+  assert.match(deleteRoute, /dailyStories/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {
