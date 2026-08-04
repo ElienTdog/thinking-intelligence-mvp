@@ -12,6 +12,8 @@ export async function POST() {
     apiKey: env.DEEPSEEK_API_KEY,
     model: env.DEEPSEEK_MODEL,
   }, true);
-  if (result.status === "failed") return Response.json(result, { status: 502 });
+  if (result.status === "failed") {
+    return Response.json({ error: result.reason ?? "今日内容生成失败" }, { status: 502 });
+  }
   return Response.json(result);
 }
