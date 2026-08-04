@@ -209,7 +209,7 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
   return Promise.all(verificationBatch.map(async (candidate) => {
     const excerpt = await fetchPublicSourceExcerpt(candidate.url, fetcher);
     return excerpt.length >= 180
-      ? { ...candidate, excerpt }
+      ? { ...candidate, excerpt, verificationStatus: "verified" as const }
       : { ...candidate, verificationStatus: "lead" as const };
   }));
 }
@@ -217,11 +217,20 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
 async function insertCandidate(db: D1Database, ownerId: string, candidate: Candidate) {
   const hash = await hashContent(`${canonicalUrl(candidate.url)}:${candidate.excerpt}`);
   const existing = await db.prepare(`
-    SELECT id FROM clips
+    SELECT id, processing_status FROM clips
     WHERE owner_id = ? AND (content_hash = ? OR (source_url = ? AND source_url <> ''))
     LIMIT 1
-  `).bind(ownerId, hash, candidate.url).first<{ id: string }>();
-  if (existing) return { id: existing.id, created: false };
+  `).bind(ownerId, hash, candidate.url).first<{ id: string; processing_status: string }>();
+  if (existing) {
+    if (candidate.verificationStatus === "verified" && existing.processing_status !== "compiled") {
+      await db.prepare(`
+        UPDATE clips
+        SET verification_status = 'verified', processing_status = 'queued', raw_excerpt = ?, processing_error = ''
+        WHERE id = ? AND owner_id = ?
+      `).bind(candidate.excerpt, existing.id, ownerId).run();
+    }
+    return { id: existing.id, created: false };
+  }
   const canCompile = candidate.verificationStatus === "verified" && candidate.excerpt.length >= 180;
   const id = crypto.randomUUID();
   await db.prepare(`
