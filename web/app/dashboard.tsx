@@ -404,7 +404,7 @@ function RawSurface({ clips, removingId, isSyncing, onCapture, onRemove, onOpenW
       <div className="raw-card-top"><span>{labels[clip.processingStatus]}</span><button onClick={() => onRemove(clip)} disabled={removingId === clip.id}>{removingId === clip.id ? "移除中" : "移除"}</button></div>
       <h2>{clipTitle(clip)}</h2>
       <p>{clipPreview(clip)}</p>
-      <footer>{clip.sourceUrl ? <a href={clip.sourceUrl} target="_blank" rel="noreferrer">{clip.publisher || "打开原文"}</a> : <span>主动收录</span>}<span>{clip.verificationStatus === "verified" ? "已核验" : clip.verificationStatus === "needs_transcript" ? "缺少文字稿" : "待核验"}</span></footer>
+      <footer>{clip.sourceUrl ? <a href={clip.sourceUrl} target="_blank" rel="noreferrer">{clip.publisher || "打开原文"}</a> : <span>主动收录</span>}<span>{clip.verificationStatus === "verified" ? "已核验" : clip.verificationStatus === "official_link" ? "公众号原文待验证" : clip.verificationStatus === "needs_transcript" ? "缺少文字稿" : "待核验"}</span></footer>
     </article>)}</div> : <div className="raw-empty"><p>还没有 Raw。</p><button onClick={onCapture}>收录第一条</button></div>}
   </section>;
 }

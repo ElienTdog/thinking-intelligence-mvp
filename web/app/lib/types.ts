@@ -26,7 +26,7 @@ export type Clip = {
   sourceType: "text" | "article" | "video";
   publisher: string;
   publishedAt: string;
-  verificationStatus: "unknown" | "verified" | "lead" | "needs_transcript";
+  verificationStatus: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";
   processingStatus: "legacy" | "queued" | "processing" | "compiled" | "skipped" | "failed";
   rawExcerpt: string;
   contentHash: string;
@@ -51,7 +51,7 @@ export type KnowledgeCard = {
   tags: string;
   sourceName: string;
   sourceUrl: string;
-  verificationStatus: "unknown" | "verified" | "lead" | "needs_transcript";
+  verificationStatus: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";
   state: "published";
   createdAt: string;
 };

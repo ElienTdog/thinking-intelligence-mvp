@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getDb } from "../../../db";
 import { clips } from "../../../db/schema";
-import { compileQueuedSources, fetchPublicSourceExcerpt, hashContent } from "../../lib/injection";
+import { compileQueuedSources, fetchPublicSourceExcerpt, hashContent, isWechatArticleUrl } from "../../lib/injection";
 import { validateClipPayload } from "../../lib/validation.mjs";
 import { ensureWikiForCards } from "../../lib/wiki";
 import { requireApiUser } from "../auth";
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     ? "needs_transcript"
     : rawExcerpt
       ? checked.value.sourceUrl ? "verified" : "unknown"
+      : isWechatArticleUrl(checked.value.sourceUrl)
+        ? "official_link"
       : "unknown";
   const processingStatus = sourceType === "video"
     ? "skipped"
@@ -53,7 +55,9 @@ export async function POST(request: Request) {
     priority: 10,
     processingError: sourceType === "video"
       ? "视频需要可靠字幕或文字稿才会编译"
-      : rawExcerpt ? "" : "未能取得足够可编译文本",
+      : rawExcerpt ? "" : verificationStatus === "official_link"
+        ? "已发现官方公众号链接，正文需在微信内完成验证后才能读取"
+        : "未能取得足够可编译文本",
   }).returning();
   const cards = processingStatus === "queued"
     ? await compileQueuedSources(env.DB, auth.user.userId, {

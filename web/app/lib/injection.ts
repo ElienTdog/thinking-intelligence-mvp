@@ -19,7 +19,7 @@ type RawRow = {
   source_type: "text" | "article" | "video";
   publisher: string;
   raw_excerpt: string;
-  verification_status: "unknown" | "verified" | "lead" | "needs_transcript";
+  verification_status: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";
   origin: "legacy" | "user_capture" | "daily_injection";
   created_at: string;
 };
@@ -30,7 +30,7 @@ type Candidate = {
   excerpt: string;
   publisher: string;
   publishedAt: string;
-  verificationStatus: "verified" | "lead";
+  verificationStatus: "verified" | "lead" | "official_link";
   sourceType: "article" | "video";
   discoveredVia: "source_feed" | "aihot" | "wechat_index";
   followed: boolean;
@@ -191,7 +191,7 @@ async function collectCandidates(feeds: FeedRow[], fetcher: typeof fetch) {
       const response = await fetcher(feed.url, { headers: { "user-agent": "ThinkingIntelligence/1.0" } });
       if (!response.ok) return [];
       const body = await response.text();
-      if (feed.feed_type === "aihot") return parseAiHotCandidates(body);
+      if (feed.feed_type === "aihot") return parseAiHotCandidates(body, aihotPublisherHint(feed.url));
       if (feed.feed_type === "wechat_index") return parseWechatIndexCandidates(body, feed.name, feed.url);
       if (feed.feed_type === "html_index") return parseHtmlIndexCandidates(body, feed.name, feed.url);
       return parseRssCandidates(body, feed.name);
@@ -241,6 +241,22 @@ async function insertCandidate(db: D1Database, ownerId: string, candidate: Candi
         SET verification_status = 'verified', processing_status = 'queued', raw_excerpt = ?, processing_error = ''
         WHERE id = ? AND owner_id = ?
       `).bind(candidate.excerpt, existing.id, ownerId).run();
+    } else if (candidate.verificationStatus === "official_link" && existing.processing_status !== "compiled") {
+      await db.prepare(`
+        UPDATE clips
+        SET content = ?, source_url = ?, source_title = ?, publisher = ?, published_at = ?,
+            verification_status = 'official_link', processing_status = 'skipped', raw_excerpt = '',
+            processing_error = '已发现官方公众号链接，正文需在微信内完成验证后才能读取'
+        WHERE id = ? AND owner_id = ?
+      `).bind(
+        candidate.url,
+        candidate.url,
+        candidate.title,
+        candidate.publisher,
+        candidate.publishedAt,
+        existing.id,
+        ownerId,
+      ).run();
     }
     return { id: existing.id, created: false };
   }
@@ -264,7 +280,7 @@ async function insertCandidate(db: D1Database, ownerId: string, candidate: Candi
     canCompile ? "queued" : "skipped",
     candidate.excerpt,
     hash,
-    canCompile ? "" : candidate.verificationStatus === "lead" ? "仅作为线索，等待原文核验" : "来源没有足够可编译文本",
+    canCompile ? "" : processingErrorFor(candidate.verificationStatus),
   ).run();
   return { id, created: true };
 }
@@ -384,7 +400,7 @@ export function parseCompiledCard(value: string): CompiledCard {
   };
 }
 
-export function parseAiHotCandidates(body: string): Candidate[] {
+export function parseAiHotCandidates(body: string, expectedPublisher = ""): Candidate[] {
   const payload = JSON.parse(body) as { items?: unknown[] } | unknown[];
   const items = Array.isArray(payload) ? payload : payload.items ?? [];
   return items.flatMap((item) => {
@@ -393,17 +409,18 @@ export function parseAiHotCandidates(body: string): Candidate[] {
     const source = value.source as Record<string, unknown> | undefined;
     const url = String(links?.original ?? value.original_url ?? value.originalUrl ?? value.url ?? "");
     const title = String(value.title ?? "").trim();
-    if (!title || !isPublicHttpUrl(url)) return [];
+    const publisher = String(source?.name ?? value.site_name ?? "AI HOT");
+    if (!title || !isPublicHttpUrl(url) || (expectedPublisher && !publisher.includes(expectedPublisher))) return [];
     return [{
       title,
       url,
       excerpt: cleanSnippet(String(value.summary ?? value.description ?? "")),
-      publisher: String(source?.name ?? value.site_name ?? "AI HOT"),
+      publisher,
       publishedAt: String(value.published_at ?? value.publishedAt ?? ""),
       verificationStatus: "lead" as const,
       sourceType: "article" as const,
       discoveredVia: "aihot" as const,
-      followed: false,
+      followed: Boolean(expectedPublisher),
     }];
   });
 }
@@ -484,15 +501,16 @@ async function verifyCandidate(candidate: Candidate, fetcher: typeof fetch) {
   if (candidate.discoveredVia === "wechat_index") {
     const originalUrl = await resolveWechatOriginalUrl(candidate.url, fetcher);
     if (!originalUrl) return { ...candidate, verificationStatus: "lead" as const };
-    const excerpt = await fetchPublicSourceExcerpt(originalUrl, fetcher);
-    return excerpt.length >= 180
-      ? { ...candidate, url: originalUrl, excerpt, verificationStatus: "verified" as const }
-      : { ...candidate, verificationStatus: "lead" as const };
+    return verifyArticleUrl({ ...candidate, url: originalUrl }, fetcher);
   }
+  return verifyArticleUrl(candidate, fetcher);
+}
+
+async function verifyArticleUrl(candidate: Candidate, fetcher: typeof fetch) {
   const excerpt = await fetchPublicSourceExcerpt(candidate.url, fetcher);
   return excerpt.length >= 180
     ? { ...candidate, excerpt, verificationStatus: "verified" as const }
-    : { ...candidate, verificationStatus: "lead" as const };
+    : { ...candidate, verificationStatus: isWechatArticleUrl(candidate.url) ? "official_link" as const : "lead" as const };
 }
 
 async function resolveWechatOriginalUrl(indexArticleUrl: string, fetcher: typeof fetch) {
@@ -526,10 +544,38 @@ export async function fetchPublicSourceExcerpt(value: string, fetcher: typeof fe
     if (!response.ok) return "";
     const contentType = response.headers.get("content-type") ?? "";
     if (!/text\/html|application\/xhtml\+xml|text\/plain/i.test(contentType)) return "";
-    return cleanSnippet(await response.text());
+    const body = await response.text();
+    if (isWechatArticleUrl(value) && /环境异常|完成验证后即可继续访问|captcha\.gtimg\.com/i.test(body)) return "";
+    return cleanSnippet(body);
   } catch {
     return "";
   }
+}
+
+export function isWechatArticleUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname === "mp.weixin.qq.com" && url.pathname === "/s";
+  } catch {
+    return false;
+  }
+}
+
+function aihotPublisherHint(value: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname === "aihot.virxact.com" && url.searchParams.get("mode") === "all"
+      ? url.searchParams.get("q") ?? ""
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function processingErrorFor(verificationStatus: Candidate["verificationStatus"]) {
+  if (verificationStatus === "official_link") return "已发现官方公众号链接，正文需在微信内完成验证后才能读取";
+  if (verificationStatus === "lead") return "仅作为线索，等待原文核验";
+  return "来源没有足够可编译文本";
 }
 
 function fallbackStory(cards: Array<CompiledCard & { id: string }>) {

@@ -112,6 +112,7 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(migration, /wiki_links/);
   assert.match(migration, /wiki_page_id/);
   assert.match(workspace, /数字生命卡兹克|赛博禅心|量子位|Datawhale/);
+  assert.match(workspace, /aihotCreatorUrl/);
   assert.match(workspace, /MacTalk/);
   assert.match(worker, /scheduled\(/);
   assert.match(worker, /runDailyInjection/);
@@ -139,6 +140,19 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(wikiSchema, /Raw layer/);
   assert.match(wikiSchema, /Story Mode/);
   assert.match(wikiSchema, /append-only/);
+});
+
+test("keeps official WeChat links as raw sources until a readable body is available", async () => {
+  const [injection, dashboard, clipRoute] = await Promise.all([
+    readFile(new URL("../app/lib/injection.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clips/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(injection, /official_link/);
+  assert.match(injection, /环境异常|完成验证后即可继续访问/);
+  assert.match(injection, /isWechatArticleUrl/);
+  assert.match(dashboard, /公众号原文待验证/);
+  assert.match(clipRoute, /isWechatArticleUrl/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {
