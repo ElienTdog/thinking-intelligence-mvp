@@ -15,6 +15,7 @@ type KnowledgeItem = {
   sourceTitle?: unknown;
   sourceUrl?: unknown;
   sourceName?: unknown;
+  sourceCoverUrl?: unknown;
   publishedAt?: unknown;
   digest?: LocalPage & { keyPoints?: unknown; relation?: unknown; relatedQuestions?: unknown };
   methods?: LocalPage[];
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
     const sourceTitle = text(item.sourceTitle, 280);
     const sourceUrl = text(item.sourceUrl, 2_000);
     const sourceName = text(item.sourceName, 280) || "本地 Wiki";
+    const sourceCoverUrl = text(item.sourceCoverUrl, 2_000);
     const digest = item.digest;
     if (!sourceLocalPath || !sourceContent || !sourceTitle || !digest) continue;
     const existingClip = await env.DB.prepare("SELECT id FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string }>();
@@ -92,15 +94,16 @@ export async function POST(request: Request) {
       text(digest.relation, 800) || "这是一条由本地 Wiki 提炼的来源解读，请回到原文核验。",
       "来自你关注的作者与本地知识库；可用迁移问题检验是否值得留下。",
       text(digest.transferPrompt, 1_000) || "把这条理解带进下一个真实任务，检验它是否会改变你的取舍。",
+      sourceCoverUrl,
       JSON.stringify(tags),
       sourceName,
       sourceUrl,
     ];
     if (card) {
-      await env.DB.prepare("UPDATE knowledge_cards SET wiki_page_id = ?, title = ?, hook = ?, explanation = ?, reasoning_move = ?, boundary = ?, why_it_matters = ?, tags = ?, source_name = ?, source_url = ?, verification_status = 'verified', state = 'published' WHERE id = ? AND owner_id = ?")
+      await env.DB.prepare("UPDATE knowledge_cards SET wiki_page_id = ?, title = ?, hook = ?, explanation = ?, reasoning_move = ?, boundary = ?, why_it_matters = ?, cover_url = ?, tags = ?, source_name = ?, source_url = ?, verification_status = 'verified', state = 'published' WHERE id = ? AND owner_id = ?")
         .bind(...values, cardId, ownerId).run();
     } else {
-      await env.DB.prepare("INSERT INTO knowledge_cards (id, owner_id, raw_source_id, wiki_page_id, title, hook, explanation, reasoning_move, boundary, why_it_matters, tags, source_name, source_url, verification_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', 'published')")
+      await env.DB.prepare("INSERT INTO knowledge_cards (id, owner_id, raw_source_id, wiki_page_id, title, hook, explanation, reasoning_move, boundary, why_it_matters, cover_url, tags, source_name, source_url, verification_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', 'published')")
         .bind(cardId, ownerId, rawSourceId, ...values).run();
     }
     mirrored.push({ sourceLocalPath, cardId });

@@ -244,9 +244,9 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   }
 
   function moveSurface(direction: "left" | "right") {
-    if (surface === "feed") setSurface(direction === "left" ? "story" : "raw");
-    if (surface === "story" && direction === "right") setSurface("feed");
-    if (surface === "raw" && direction === "left") setSurface("feed");
+    if (surface === "raw" && direction === "right") setSurface("feed");
+    if (surface === "feed") setSurface(direction === "left" ? "raw" : "story");
+    if (surface === "story" && direction === "left") setSurface("feed");
   }
 
   function beginTouch(event: React.TouchEvent<HTMLElement>) {
@@ -279,7 +279,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const vertical = end.clientY - start.y;
     const velocity = Math.abs(horizontal) / Math.max(1, performance.now() - start.at);
     if ((Math.abs(horizontal) < 64 && velocity < 0.55) || Math.abs(horizontal) < Math.abs(vertical) * 1.2) return;
-    moveSurface(horizontal < 0 ? "left" : "right");
+    moveSurface(horizontal < 0 ? "right" : "left");
   }
 
   if (!data) return <main className="loading" aria-busy="true"><div className="loading-stack"><span /><span /><span /></div><p>正在打开知识流</p></main>;
@@ -296,18 +296,18 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   >
     <div className="feed-chrome" aria-label="知识流控制">
       <button className="capture-trigger" onClick={() => setShowCapture(true)} aria-label="收录内容" title="收录内容">+</button>
-      <div className="surface-mark" aria-label={surface === "feed" ? "推荐" : surface === "story" ? "故事" : "Raw 来源"}>
-        <span className={surface === "story" ? "is-current" : ""} />
-        <span className={surface === "feed" ? "is-current" : ""} />
+      <div className="surface-mark" aria-label={surface === "feed" ? "推荐" : surface === "story" ? "故事" : "来源收件箱"}>
         <span className={surface === "raw" ? "is-current" : ""} />
+        <span className={surface === "feed" ? "is-current" : ""} />
+        <span className={surface === "story" ? "is-current" : ""} />
       </div>
       <button className="feed-account" aria-label={`当前用户：${displayName}`} title={displayName}>{displayName.slice(0, 1) || "我"}</button>
     </div>
 
     {notice && <p className="feed-toast" role="status">{notice}</p>}
 
-    {surface !== "story" && <button className="surface-edge surface-edge--left" onClick={() => moveSurface("left")} aria-label={surface === "feed" ? "进入今日故事" : "回到推荐"} title={surface === "feed" ? "今日故事" : "推荐"}>‹</button>}
-    {surface !== "raw" && <button className="surface-edge surface-edge--right" onClick={() => moveSurface("right")} aria-label={surface === "feed" ? "查看 Raw 来源" : "回到推荐"} title={surface === "feed" ? "Raw 来源" : "推荐"}>›</button>}
+    {surface !== "raw" && <button className="surface-edge surface-edge--left" onClick={() => moveSurface("left")} aria-label={surface === "feed" ? "查看来源收件箱" : "回到推荐"} title={surface === "feed" ? "来源收件箱" : "推荐"}>‹</button>}
+    {surface !== "story" && <button className="surface-edge surface-edge--right" onClick={() => moveSurface("right")} aria-label={surface === "feed" ? "进入今日故事" : "回到推荐"} title={surface === "feed" ? "今日故事" : "推荐"}>›</button>}
 
     <div
       className="surface-track"

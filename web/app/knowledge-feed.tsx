@@ -155,7 +155,8 @@ function KnowledgeCardView({
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
     <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
-    <div className="knowledge-copy"><h2>{card.hook}</h2><p>{card.title}</p></div>
+    {card.coverUrl && <div className="knowledge-cover"><img src={card.coverUrl} alt="" /></div>}
+    <div className="knowledge-copy"><h2>{card.title}</h2><p>{compactHook(card.hook)}</p></div>
     <div className="knowledge-bottom">
       <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>
       <div className="knowledge-actions" onClick={(event) => event.stopPropagation()}>
@@ -180,8 +181,10 @@ function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, 
   const connections = getConnections(card.wikiPageId, wiki);
   return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}>
     <div className="detail-head"><span>{card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
-    <h2>{card.hook}</h2>
-    <section><p>核心观点</p><strong>{card.explanation}</strong></section>
+    {card.coverUrl && <img className="detail-cover" src={card.coverUrl} alt="" />}
+    <h2>{card.title}</h2>
+    <section><p>它在说什么</p><strong>{card.hook}</strong></section>
+    <section><p>关键点</p><strong>{card.explanation}</strong></section>
     <section><p>推理动作</p><span>{card.reasoningMove}</span></section>
     <section><p>适用边界</p><span>{card.boundary}</span></section>
     <section><p>为什么重要</p><span>{card.whyItMatters}</span></section>
@@ -219,6 +222,11 @@ function parseTags(value: string) {
   } catch {
     return [];
   }
+}
+
+function compactHook(value: string) {
+  const compact = value.replace(/^文章(?:介绍|讲述|讨论|分享)[：:]?\s*/, "").replace(/\s+/g, " ").trim();
+  return compact.length > 86 ? `${compact.slice(0, 86)}...` : compact;
 }
 
 function isFollowedCreator(card: KnowledgeCard) {

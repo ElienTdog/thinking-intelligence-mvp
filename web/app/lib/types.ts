@@ -51,6 +51,7 @@ export type KnowledgeCard = {
   reasoningMove: string;
   boundary: string;
   whyItMatters: string;
+  coverUrl: string;
   tags: string;
   sourceName: string;
   sourceUrl: string;
