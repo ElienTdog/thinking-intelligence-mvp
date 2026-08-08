@@ -131,6 +131,7 @@ function KnowledgeCardView({
   onOpen: () => void;
 }) {
   const tags = parseTags(card.tags);
+  const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
 
   function openSource(event: MouseEvent<HTMLAnchorElement>) {
     event.stopPropagation();
@@ -140,7 +141,7 @@ function KnowledgeCardView({
   return <article className={`knowledge-card tone-${index % 3}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
-    <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
+    <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
     <div className="knowledge-copy"><h2>{card.hook}</h2><p>{card.title}</p></div>
     <div className="knowledge-bottom">
       <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>

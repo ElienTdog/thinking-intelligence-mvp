@@ -11,6 +11,7 @@ type WikiLint = {
   missingSources: Array<{ id: string; title: string }>;
   unverified: Array<{ id: string; title: string }>;
 };
+type SyncStatus = { connected: boolean; lastUsedAt: string; inbox: number; needsClipper: number; mirrored: number };
 
 async function requestJson(path: string, body?: unknown, method: "POST" | "DELETE" = "POST") {
   const response = await fetch(path, method === "DELETE" ? { method } : body === undefined ? undefined : {
@@ -49,6 +50,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [showCapture, setShowCapture] = useState(false);
   const [showSyncConnect, setShowSyncConnect] = useState(false);
   const [syncToken, setSyncToken] = useState("");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [readingClip, setReadingClip] = useState<Clip | null>(null);
   const [captureContent, setCaptureContent] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -67,6 +69,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     try {
       const next = await requestJson("/api/bootstrap") as BootstrapPayload;
       setData(next);
+      void fetch("/api/local-sync/status").then((response) => response.ok ? response.json() : null).then((status) => { if (status) setSyncStatus(status as SyncStatus); }).catch(() => undefined);
       try {
         const feed = await requestJson("/api/feed?limit=8") as FeedPayload;
         setFeedCards(feed.cards);
@@ -312,7 +315,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       aria-live="polite"
     >
       <section className="surface-panel" aria-hidden={surface !== "raw"}>
-        <RawSurface clips={data.clips} removingId={removingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
+        <RawSurface clips={data.clips} syncStatus={syncStatus} removingId={removingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
       </section>
       <section className="surface-panel" aria-hidden={surface !== "feed"}>
         <KnowledgeFeed
@@ -393,8 +396,9 @@ function CaptureSheet({ content, onContentChange, onCaptureClipboard, onClose, o
   </section>;
 }
 
-function RawSurface({ clips, removingId, onCapture, onRemove, onOpenWiki, onConnect, onRead }: {
+function RawSurface({ clips, syncStatus, removingId, onCapture, onRemove, onOpenWiki, onConnect, onRead }: {
   clips: Clip[];
+  syncStatus: SyncStatus | null;
   removingId: string;
   onCapture: () => void;
   onRemove: (clip: Clip) => void;
@@ -405,7 +409,7 @@ function RawSurface({ clips, removingId, onCapture, onRemove, onOpenWiki, onConn
   const labels: Record<Clip["processingStatus"], string> = {
     legacy: "旧收录",
     inbox: "等待本地入库",
-    mirrored: "已同步到 Wiki",
+    mirrored: "已维护并镜像",
     needs_clipper: "等待你剪藏",
     queued: "等待编译",
     processing: "正在编译",
@@ -413,8 +417,9 @@ function RawSurface({ clips, removingId, onCapture, onRemove, onOpenWiki, onConn
     skipped: "停留在 Raw",
     failed: "编译失败",
   };
+  const syncLabel = !syncStatus ? "正在读取同步状态" : syncStatus.connected ? `已镜像 ${syncStatus.mirrored} 条` : "尚未连接本地 Wiki";
   return <section className="raw-surface" aria-label="来源收件箱">
-    <header className="raw-head"><div><p>来源收件箱</p><span>{clips.length} 条来源；本地 Wiki 是主库</span></div><div className="raw-head-actions"><button className="raw-index-trigger" onClick={onOpenWiki} aria-label="打开知识索引" title="知识索引与自检">⌘</button><button className="raw-sync-trigger" onClick={onConnect} aria-label="连接本地 Wiki" title="连接本地 Wiki">⌁</button><button onClick={onCapture} aria-label="收录来源" title="收录来源">+</button></div></header>
+    <header className="raw-head"><div><p>来源收件箱</p><span>{clips.length} 条来源；{syncLabel}</span></div><div className="raw-head-actions"><button className="raw-index-trigger" onClick={onOpenWiki} aria-label="打开知识索引" title="知识索引与自检">⌘</button><button className="raw-sync-trigger" onClick={onConnect} aria-label="连接本地 Wiki" title="连接本地 Wiki">⌁</button><button onClick={onCapture} aria-label="收录来源" title="收录来源">+</button></div></header>
     {clips.length ? <div className="raw-grid">{clips.map((clip) => <article className="raw-card" key={clip.id}>
       <div className="raw-card-top"><span>{labels[clip.processingStatus]}</span><button onClick={() => onRemove(clip)} disabled={removingId === clip.id}>{removingId === clip.id ? "移除中" : "移除"}</button></div>
       <h2>{clipTitle(clip)}</h2>

@@ -121,10 +121,13 @@ export function rankKnowledgeCards(cards, events) {
       if (savedTags.has(tag)) score += 9;
       if (mutedTags.has(tag)) score -= 14;
     }
+    if (tags.some((tag) => tag.startsWith("creator:") && PREFERRED_CREATORS.has(tag.slice(8)))) score += 18;
     const ageDays = Math.max(0, (Date.now() - new Date(card.createdAt).getTime()) / 86_400_000);
     return score + Math.max(0, 12 - ageDays);
   }
 }
+
+const PREFERRED_CREATORS = new Set(["数字生命卡兹克", "赛博禅心", "MacTalk", "量子位", "Datawhale"]);
 
 function parseTags(value) {
   try {
