@@ -21,6 +21,7 @@ test("does not retain the starter preview in product sources", async () => {
   assert.match(page, /force-dynamic/);
   assert.match(page, /requestedCapture/);
   assert.match(layout, /思考情报台/);
+  assert.match(page, /本地 Wiki/);
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
@@ -82,8 +83,8 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
   assert.ok(validateFeedEventPayload({ cardId: "card", eventType: "invented" }).error);
 });
 
-test("declares the owner-scoped feed and daily injection surfaces", async () => {
-  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema] = await Promise.all([
+test("declares the owner-scoped feed and local Wiki mirror surfaces", async () => {
+  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema, inboxRoute, mirrorRoute, tokenRoute] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_exotic_whirlwind.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/knowledge-workspace.ts", import.meta.url), "utf8"),
@@ -98,6 +99,9 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
     readFile(new URL("../app/api/wiki/query/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/wiki.ts", import.meta.url), "utf8"),
     readFile(new URL("../LLM_WIKI_SCHEMA.md", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/local-sync/inbox/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/local-sync/mirror/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/local-sync/token/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(schema, /source_feeds/);
   assert.match(schema, /knowledge_cards/);
@@ -108,14 +112,15 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(schema, /wiki_page_sources/);
   assert.match(schema, /wiki_activity/);
   assert.match(schema, /learning_attempts/);
+  assert.match(schema, /wikiSyncTokens/);
   assert.match(migration, /wiki_pages/);
   assert.match(migration, /wiki_links/);
   assert.match(migration, /wiki_page_id/);
   assert.match(workspace, /数字生命卡兹克|赛博禅心|量子位|Datawhale/);
   assert.match(workspace, /aihotCreatorUrl/);
   assert.match(workspace, /MacTalk/);
-  assert.match(worker, /scheduled\(/);
-  assert.match(worker, /runDailyInjection/);
+  assert.match(worker, /Local Markdown is the write authority/);
+  assert.doesNotMatch(worker, /runDailyInjection/);
   assert.match(feedRoute, /knowledgeCards\.ownerId/);
   assert.match(eventRoute, /knowledgeCards\.ownerId/);
   assert.match(runRoute, /DEEPSEEK_API_KEY/);
@@ -125,7 +130,10 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(dashboard, /\/api\/learning-attempts/);
   assert.match(dashboard, /\/api\/wiki\/lint/);
   assert.match(dashboard, /\/api\/wiki\/query/);
-  assert.match(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
+  assert.match(dashboard, /已刷新本地 Wiki 的在线镜像/);
+  assert.doesNotMatch(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
+  assert.match(dashboard, /连接本地 Wiki/);
+  assert.match(dashboard, /在线阅读/);
   assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
   assert.match(deleteRoute, /knowledgeCards\.ownerId/);
   assert.match(deleteRoute, /feedEvents/);
@@ -140,9 +148,12 @@ test("declares the owner-scoped feed and daily injection surfaces", async () => 
   assert.match(wikiSchema, /Raw layer/);
   assert.match(wikiSchema, /Story Mode/);
   assert.match(wikiSchema, /append-only/);
+  assert.match(inboxRoute, /processing_status IN \('inbox', 'needs_clipper'\)/);
+  assert.match(mirrorRoute, /local_path/);
+  assert.match(tokenRoute, /wikiSyncTokens/);
 });
 
-test("keeps official WeChat links as raw sources until a readable body is available", async () => {
+test("keeps official WeChat links out of automatic compilation", async () => {
   const [injection, dashboard, clipRoute] = await Promise.all([
     readFile(new URL("../app/lib/injection.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
@@ -152,7 +163,8 @@ test("keeps official WeChat links as raw sources until a readable body is availa
   assert.match(injection, /环境异常|完成验证后即可继续访问/);
   assert.match(injection, /isWechatArticleUrl/);
   assert.match(dashboard, /公众号原文待验证/);
-  assert.match(clipRoute, /isWechatArticleUrl/);
+  assert.doesNotMatch(clipRoute, /compileQueuedSources/);
+  assert.match(clipRoute, /processingStatus: "inbox"/);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

@@ -29,6 +29,13 @@
       "when": 1785865489657,
       "tag": "0003_exotic_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786240000000,
+      "tag": "0004_local_wiki_mirror",
+      "breakpoints": true
     }
   ]
 }

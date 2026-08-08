@@ -22,17 +22,20 @@ export type Clip = {
   sourceUrl: string;
   sourceTitle: string;
   status: string;
-  origin: "legacy" | "user_capture" | "daily_injection";
+  origin: "legacy" | "user_capture" | "daily_injection" | "local_wiki";
   sourceType: "text" | "article" | "video";
   publisher: string;
   publishedAt: string;
   verificationStatus: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";
-  processingStatus: "legacy" | "queued" | "processing" | "compiled" | "skipped" | "failed";
+  processingStatus: "legacy" | "inbox" | "mirrored" | "needs_clipper" | "queued" | "processing" | "compiled" | "skipped" | "failed";
   rawExcerpt: string;
   contentHash: string;
   priority: number;
   processingError: string;
   processedAt: string;
+  localPath: string;
+  mirrorVersion: string;
+  mirrorUpdatedAt: string;
   createdAt: string;
 };
 

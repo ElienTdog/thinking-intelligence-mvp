@@ -42,11 +42,14 @@ function clipPreview(clip: Clip) {
 
 export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [data, setData] = useState<BootstrapPayload | null>(null);
-  const [surface, setSurface] = useState<Surface>("feed");
+  const [surface, setSurface] = useState<Surface>("raw");
   const [feedCards, setFeedCards] = useState<KnowledgeCard[]>([]);
   const [nextFeedCursor, setNextFeedCursor] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [showCapture, setShowCapture] = useState(false);
+  const [showSyncConnect, setShowSyncConnect] = useState(false);
+  const [syncToken, setSyncToken] = useState("");
+  const [readingClip, setReadingClip] = useState<Clip | null>(null);
   const [captureContent, setCaptureContent] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [removingId, setRemovingId] = useState("");
@@ -81,10 +84,10 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const value = content.trim();
     if (!value) return;
     try {
-      const result = await requestJson("/api/clips", { content: value }) as { card?: { id: string } | null; duplicate?: boolean };
+      const result = await requestJson("/api/clips", { content: value }) as { duplicate?: boolean };
       setCaptureContent("");
       setShowCapture(false);
-      setNotice(result.duplicate ? "这条内容已经在 Raw 里了。" : result.card ? "已收录，正在进入推荐。" : "已收录到 Raw。它会等到有可用原文时再编译。");
+      setNotice(result.duplicate ? "这条来源已经在收件箱里了。" : "已进入来源收件箱，等待本地 Wiki 助手处理。 ");
       await load();
     } catch (error) {
       setCaptureContent(value);
@@ -124,12 +127,9 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   const generateToday = useCallback(() => {
     setIsGenerating(true);
-    void requestJson("/api/injection/run", {})
-      .then(async () => {
-        setNotice("今日内容已刷新。");
-        await load();
-      })
-      .catch((error) => setNotice(error instanceof Error ? error.message : "今日内容生成失败"))
+    void load()
+      .then(() => setNotice("已刷新本地 Wiki 的在线镜像。"))
+      .catch((error) => setNotice(error instanceof Error ? error.message : "暂时无法刷新镜像"))
       .finally(() => setIsGenerating(false));
   }, [load]);
 
@@ -198,6 +198,16 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     void requestJson("/api/wiki/lint")
       .then((result) => setWikiLint(result as WikiLint))
       .catch((error) => setNotice(error instanceof Error ? error.message : "暂时无法检查 Wiki"));
+  }, []);
+
+  const createSyncToken = useCallback(async () => {
+    try {
+      const result = await requestJson("/api/local-sync/token", {}) as { token: string };
+      setSyncToken(result.token);
+      setShowSyncConnect(true);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "暂时无法创建本地同步凭证");
+    }
   }, []);
 
   const askWiki = useCallback(async (question: string) => {
@@ -302,7 +312,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       aria-live="polite"
     >
       <section className="surface-panel" aria-hidden={surface !== "raw"}>
-        <RawSurface clips={data.clips} removingId={removingId} isSyncing={isGenerating} onCapture={() => setShowCapture(true)} onRemove={removeSource} onOpenWiki={openWiki} onSync={generateToday} />
+        <RawSurface clips={data.clips} removingId={removingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
       </section>
       <section className="surface-panel" aria-hidden={surface !== "feed"}>
         <KnowledgeFeed
@@ -357,6 +367,8 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       onClose={() => setShowCapture(false)}
       onSubmit={submitCapture}
     />}
+    {showSyncConnect && <SyncConnectSheet token={syncToken} onClose={() => setShowSyncConnect(false)} />}
+    {readingClip && <RawReadingSheet clip={readingClip} onClose={() => setReadingClip(null)} />}
     {linkingCard && <QuestionBridge card={linkingCard} questions={data.questions} onClose={() => setLinkingCard(null)} onSelect={(question) => void connectToQuestion(question)} onCreate={(title, initialJudgment) => void createQuestion(title, initialJudgment)} />}
     {practice && practicePage && <PracticeSheet key={`${practicePage.id}:${practice.promptType}`} page={practicePage} initialPromptType={practice.promptType} onClose={() => setPractice(null)} onSubmit={(promptType, response) => void savePractice(practicePage.id, promptType, response)} />}
     {showWiki && <WikiSheet pages={data.wiki.pages} activity={data.wiki.activity} lint={wikiLint} queryResult={wikiQueryResult} onAsk={(question) => void askWiki(question)} onClose={() => setShowWiki(false)} />}
@@ -372,40 +384,67 @@ function CaptureSheet({ content, onContentChange, onCaptureClipboard, onClose, o
 }) {
   return <section className="capture-sheet" role="dialog" aria-modal="true" aria-label="收录内容">
     <div className="sheet-handle" />
-    <div className="sheet-head"><p>收录</p><button onClick={onClose} aria-label="关闭收录">×</button></div>
+    <div className="sheet-head"><p>来源收件箱</p><button onClick={onClose} aria-label="关闭收录">×</button></div>
     <button className="clipboard-capture" type="button" onClick={onCaptureClipboard}>收录剪贴板</button>
     <form onSubmit={onSubmit}>
-      <textarea value={content} onChange={(event) => onContentChange(event.target.value)} required maxLength={8000} placeholder="链接或一段文字" aria-label="要收录的内容" />
-      <button className="capture-submit">收录</button>
+      <textarea value={content} onChange={(event) => onContentChange(event.target.value)} required maxLength={8000} placeholder="粘贴一个链接或一段原始文字" aria-label="要收录的内容" />
+      <button className="capture-submit">放入收件箱</button>
     </form>
   </section>;
 }
 
-function RawSurface({ clips, removingId, isSyncing, onCapture, onRemove, onOpenWiki, onSync }: {
+function RawSurface({ clips, removingId, onCapture, onRemove, onOpenWiki, onConnect, onRead }: {
   clips: Clip[];
   removingId: string;
-  isSyncing: boolean;
   onCapture: () => void;
   onRemove: (clip: Clip) => void;
   onOpenWiki: () => void;
-  onSync: () => void;
+  onConnect: () => void;
+  onRead: (clip: Clip) => void;
 }) {
   const labels: Record<Clip["processingStatus"], string> = {
     legacy: "旧收录",
+    inbox: "等待本地入库",
+    mirrored: "已同步到 Wiki",
+    needs_clipper: "等待你剪藏",
     queued: "等待编译",
     processing: "正在编译",
     compiled: "已编译",
     skipped: "停留在 Raw",
     failed: "编译失败",
   };
-  return <section className="raw-surface" aria-label="Raw 来源">
-    <header className="raw-head"><div><p>Raw</p><span>{clips.length} 个原始来源</span></div><div className="raw-head-actions"><button className="raw-index-trigger" onClick={onOpenWiki} aria-label="打开知识索引" title="知识索引与自检">⌘</button><button className="raw-sync-trigger" onClick={onSync} disabled={isSyncing} aria-label="同步关注源" title="同步关注源">↻</button><button onClick={onCapture} aria-label="收录来源" title="收录来源">+</button></div></header>
+  return <section className="raw-surface" aria-label="来源收件箱">
+    <header className="raw-head"><div><p>来源收件箱</p><span>{clips.length} 条来源；本地 Wiki 是主库</span></div><div className="raw-head-actions"><button className="raw-index-trigger" onClick={onOpenWiki} aria-label="打开知识索引" title="知识索引与自检">⌘</button><button className="raw-sync-trigger" onClick={onConnect} aria-label="连接本地 Wiki" title="连接本地 Wiki">⌁</button><button onClick={onCapture} aria-label="收录来源" title="收录来源">+</button></div></header>
     {clips.length ? <div className="raw-grid">{clips.map((clip) => <article className="raw-card" key={clip.id}>
       <div className="raw-card-top"><span>{labels[clip.processingStatus]}</span><button onClick={() => onRemove(clip)} disabled={removingId === clip.id}>{removingId === clip.id ? "移除中" : "移除"}</button></div>
       <h2>{clipTitle(clip)}</h2>
       <p>{clipPreview(clip)}</p>
-      <footer>{clip.sourceUrl ? <a href={clip.sourceUrl} target="_blank" rel="noreferrer">{clip.publisher || "打开原文"}</a> : <span>主动收录</span>}<span>{clip.verificationStatus === "verified" ? "已核验" : clip.verificationStatus === "official_link" ? "公众号原文待验证" : clip.verificationStatus === "needs_transcript" ? "缺少文字稿" : "待核验"}</span></footer>
+      <footer>{clip.sourceUrl ? <a href={clip.sourceUrl} target="_blank" rel="noreferrer">{clip.publisher || "打开原文"}</a> : <span>主动收录</span>}<span>{clip.localPath ? `Wiki：${clip.localPath}` : clip.verificationStatus === "official_link" ? "公众号原文待验证" : "尚未入库"}</span></footer>
+      {clip.processingStatus === "mirrored" && <button className="raw-read" onClick={() => onRead(clip)}>在线阅读</button>}
     </article>)}</div> : <div className="raw-empty"><p>还没有 Raw。</p><button onClick={onCapture}>收录第一条</button></div>}
+  </section>;
+}
+
+function RawReadingSheet({ clip, onClose }: { clip: Clip; onClose: () => void }) {
+  return <section className="raw-reading-sheet" role="dialog" aria-modal="true" aria-label={`阅读 ${clipTitle(clip)}`}>
+    <div className="sheet-head"><div><p>{clipTitle(clip)}</p><span>{clip.localPath || "本地 Wiki 镜像"}</span></div><button onClick={onClose} aria-label="关闭阅读">×</button></div>
+    {clip.sourceUrl && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">打开原文</a>}
+    <article>{clip.content}</article>
+  </section>;
+}
+
+function SyncConnectSheet({ token, onClose }: { token: string; onClose: () => void }) {
+  const command = `python3 tools/wiki_inbox_sync.py --server "${window.location.origin}" --token "${token}" --configure`;
+  async function copyCommand() {
+    await navigator.clipboard.writeText(command);
+  }
+  return <section className="capture-sheet sync-connect-sheet" role="dialog" aria-modal="true" aria-label="连接本地 Wiki">
+    <div className="sheet-handle" />
+    <div className="sheet-head"><div><p>连接本地 Wiki</p><span>这个凭证只显示一次</span></div><button onClick={onClose} aria-label="关闭连接说明">×</button></div>
+    <p className="sync-connect-copy">在 Mac 终端、`/Users/bytedance/Documents/思考` 文件夹下运行一次。它会把凭证保存到钥匙串，不会写入你的笔记。</p>
+    <code className="sync-command">{command}</code>
+    <button className="capture-submit" type="button" onClick={() => void copyCommand()}>复制连接命令</button>
+    <p className="sync-connect-copy">之后运行同一个脚本即可把收件箱写入本地 Wiki；自动登录运行的安装项会在下一步提供。</p>
   </section>;
 }
 
