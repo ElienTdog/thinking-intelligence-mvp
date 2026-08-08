@@ -171,6 +171,8 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(knowledgeFeed, /ReviewMomentView/);
   assert.match(knowledgeFeed, /在 Wiki 里/);
   assert.match(knowledgeFeed, /knowledge-cover/);
+  assert.match(knowledgeFeed, /KnowledgeCover/);
+  assert.match(knowledgeFeed, /onError=\{\(\) => setUnavailable\(true\)\}/);
   assert.match(knowledgeFeed, /compactHook/);
   assert.match(wikiRoute, /getWikiLint/);
   assert.match(wikiQueryRoute, /queryWiki/);
