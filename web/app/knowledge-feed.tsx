@@ -155,7 +155,7 @@ function KnowledgeCardView({
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
     <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
-    {card.coverUrl && <div className="knowledge-cover"><img src={card.coverUrl} alt="" /></div>}
+    <KnowledgeCover url={card.coverUrl} />
     <div className="knowledge-copy"><h2>{card.title}</h2><p>{compactHook(card.hook)}</p></div>
     <div className="knowledge-bottom">
       <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>
@@ -181,7 +181,7 @@ function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, 
   const connections = getConnections(card.wikiPageId, wiki);
   return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}>
     <div className="detail-head"><span>{card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
-    {card.coverUrl && <img className="detail-cover" src={card.coverUrl} alt="" />}
+    <KnowledgeCover url={card.coverUrl} detail />
     <h2>{card.title}</h2>
     <section><p>它在说什么</p><strong>{card.hook}</strong></section>
     <section><p>关键点</p><strong>{card.explanation}</strong></section>
@@ -199,6 +199,13 @@ function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, 
       <button className="remove-source" onClick={onRemoveSource}>移除来源</button>
     </div>
   </section>;
+}
+
+function KnowledgeCover({ url, detail = false }: { url: string; detail?: boolean }) {
+  const [unavailable, setUnavailable] = useState(false);
+  if (!url || unavailable) return null;
+  const image = <img className={detail ? "detail-cover" : ""} src={url} alt="" onError={() => setUnavailable(true)} />;
+  return detail ? image : <div className="knowledge-cover">{image}</div>;
 }
 
 function getConnections(pageId: string | null, wiki: WikiSnapshot) {
