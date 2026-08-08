@@ -91,6 +91,7 @@ export async function POST(request: Request) {
       keyPoints.join("\n"),
       text(digest.relation, 800) || "这是一条由本地 Wiki 提炼的来源解读，请回到原文核验。",
       "来自你关注的作者与本地知识库；可用迁移问题检验是否值得留下。",
+      text(digest.transferPrompt, 1_000) || "把这条理解带进下一个真实任务，检验它是否会改变你的取舍。",
       JSON.stringify(tags),
       sourceName,
       sourceUrl,
