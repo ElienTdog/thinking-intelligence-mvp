@@ -1,7 +1,6 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { runDailyInjection } from "../app/lib/injection";
 
 interface Env {
   ASSETS: Fetcher;
@@ -51,10 +50,11 @@ const worker = {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runDailyInjection(env.DB, {
-      apiKey: env.DEEPSEEK_API_KEY,
-      model: env.DEEPSEEK_MODEL,
-    }));
+    // Local Markdown is the write authority. The worker must not recreate a
+    // second, model-generated knowledge base from scheduled source scans.
+    void _controller;
+    void env;
+    ctx.waitUntil(Promise.resolve());
   },
 };
 

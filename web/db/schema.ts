@@ -49,12 +49,30 @@ export const clips = sqliteTable(
     priority: integer("priority").notNull().default(0),
     processingError: text("processing_error").notNull().default(""),
     processedAt: text("processed_at").notNull().default(""),
+    localPath: text("local_path").notNull().default(""),
+    mirrorVersion: text("mirror_version").notNull().default(""),
+    mirrorUpdatedAt: text("mirror_updated_at").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     index("idx_clips_owner_created").on(table.ownerId, table.createdAt),
     index("idx_clips_owner_processing").on(table.ownerId, table.processingStatus, table.priority),
     index("idx_clips_owner_hash").on(table.ownerId, table.contentHash),
+  ],
+);
+
+export const wikiSyncTokens = sqliteTable(
+  "wiki_sync_tokens",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    lastUsedAt: text("last_used_at").notNull().default(""),
+  },
+  (table) => [
+    index("idx_wiki_sync_tokens_hash").on(table.tokenHash),
+    index("idx_wiki_sync_tokens_owner").on(table.ownerId),
   ],
 );
 
