@@ -1,0 +1,208 @@
+"use client";
+
+import { type MouseEvent, useEffect, useRef, useState } from "react";
+import type { DailyStory, KnowledgeCard, ReviewMoment, WikiSnapshot } from "./lib/types";
+
+type FeedEventType = "seen" | "completed" | "saved" | "less_like" | "opened_source";
+export type LearningPromptType = "recall" | "transfer" | "counter";
+
+type KnowledgeFeedProps = {
+  mode: "feed" | "story";
+  active: boolean;
+  cards: KnowledgeCard[];
+  story: DailyStory | null;
+  storyCards: KnowledgeCard[];
+  wiki: WikiSnapshot;
+  hasMore: boolean;
+  isGenerating: boolean;
+  onEvent: (cardId: string, eventType: FeedEventType) => void;
+  onLoadMore: () => void;
+  onOpenStory: () => void;
+  onGenerateToday: () => void;
+  onLinkQuestion: (card: KnowledgeCard) => void;
+  onRemoveSource: (rawSourceId: string) => void;
+  onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
+};
+
+export function KnowledgeFeed({
+  mode,
+  active,
+  cards,
+  story,
+  storyCards,
+  wiki,
+  hasMore,
+  isGenerating,
+  onEvent,
+  onLoadMore,
+  onOpenStory,
+  onGenerateToday,
+  onLinkQuestion,
+  onRemoveSource,
+  onStartPractice,
+}: KnowledgeFeedProps) {
+  const visibleCards = mode === "story" ? storyCards : cards;
+  const [selected, setSelected] = useState<KnowledgeCard | null>(null);
+  const seenCardId = useRef("");
+
+  useEffect(() => {
+    const first = visibleCards[0];
+    if (!active || !first || seenCardId.current === first.id) return;
+    seenCardId.current = first.id;
+    onEvent(first.id, "seen");
+  }, [active, onEvent, visibleCards]);
+
+  if (!visibleCards.length) {
+    return <section className="feed-empty" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
+      <p>{mode === "story" ? "今天还没有故事" : "下一条知识正在路上"}</p>
+      <span>{mode === "story" ? "当有足够的可核验知识卡时，它会从一个问题开始。" : "你收录的内容，会优先进入这里。"}</span>
+      <button onClick={onGenerateToday} disabled={isGenerating}>{isGenerating ? "生成中" : "生成今日内容"}</button>
+    </section>;
+  }
+
+  return <section className="knowledge-deck" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
+    <div className="knowledge-scroll">
+      {mode === "feed" && wiki.review && <ReviewMomentView review={wiki.review} onPractice={onStartPractice} />}
+      {mode === "story" && story && <StoryOpening story={story} />}
+      {visibleCards.map((card, index) => <KnowledgeCardView
+        key={card.id}
+        card={card}
+        chapter={mode === "story" ? index + 1 : 0}
+        index={index}
+        onEvent={onEvent}
+        onOpenStory={onOpenStory}
+        onOpen={() => {
+          setSelected(card);
+          onEvent(card.id, "completed");
+        }}
+      />)}
+      {mode === "feed" && (hasMore
+        ? <button className="load-more" onClick={onLoadMore}>继续加载</button>
+        : <p className="feed-end">刷到底了</p>)}
+      {mode === "story" && story && <footer className="story-takeaway"><p>今天带走</p><strong>{story.takeaway}</strong></footer>}
+    </div>
+    {selected && <KnowledgeDetail
+      card={selected}
+      onClose={() => setSelected(null)}
+      onEvent={onEvent}
+      onOpenStory={onOpenStory}
+      onLinkQuestion={() => { setSelected(null); onLinkQuestion(selected); }}
+      onRemoveSource={() => { setSelected(null); onRemoveSource(selected.rawSourceId); }}
+      wiki={wiki}
+      onStartPractice={onStartPractice}
+    />}
+  </section>;
+}
+
+function ReviewMomentView({ review, onPractice }: { review: ReviewMoment; onPractice: (pageId: string, promptType: LearningPromptType) => void }) {
+  const prompt = review.promptType === "transfer"
+    ? review.page.transferPrompt
+    : review.promptType === "counter"
+      ? `你会从哪里质疑「${review.page.title}」？`
+      : review.page.recallPrompt;
+  return <article className="review-moment">
+    <div className="knowledge-topline"><span>到期回看</span><span>先不看答案</span></div>
+    <div className="knowledge-copy"><h2>{review.page.title}</h2><p>{prompt}</p></div>
+    <div className="knowledge-bottom"><span>把它从记忆里取出来，再决定是否留下。</span><button onClick={() => onPractice(review.page.id, review.promptType)}>回应</button></div>
+  </article>;
+}
+
+function StoryOpening({ story }: { story: DailyStory }) {
+  return <article className="story-opening">
+    <p>今日故事 · {story.storyDate}</p>
+    <h1>{story.title}</h1>
+    <span>{story.openingQuestion}</span>
+  </article>;
+}
+
+function KnowledgeCardView({
+  card,
+  chapter,
+  index,
+  onEvent,
+  onOpenStory,
+  onOpen,
+}: {
+  card: KnowledgeCard;
+  chapter: number;
+  index: number;
+  onEvent: (cardId: string, eventType: FeedEventType) => void;
+  onOpenStory: () => void;
+  onOpen: () => void;
+}) {
+  const tags = parseTags(card.tags);
+
+  function openSource(event: MouseEvent<HTMLAnchorElement>) {
+    event.stopPropagation();
+    onEvent(card.id, "opened_source");
+  }
+
+  return <article className={`knowledge-card tone-${index % 3}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
+  }}>
+    <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
+    <div className="knowledge-copy"><h2>{card.hook}</h2><p>{card.title}</p></div>
+    <div className="knowledge-bottom">
+      <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>
+      <div className="knowledge-actions" onClick={(event) => event.stopPropagation()}>
+        <button onClick={() => onEvent(card.id, "saved")} aria-label="收藏" title="收藏">☆</button>
+        <button onClick={() => onEvent(card.id, "less_like")} aria-label="少看这类" title="少看这类">−</button>
+        {card.storyId && !chapter && <button onClick={onOpenStory} aria-label="进入今日故事" title="今日故事">↗</button>}
+      </div>
+    </div>
+  </article>;
+}
+
+function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, onRemoveSource, wiki, onStartPractice }: {
+  card: KnowledgeCard;
+  onClose: () => void;
+  onEvent: (cardId: string, eventType: FeedEventType) => void;
+  onOpenStory: () => void;
+  onLinkQuestion: () => void;
+  onRemoveSource: () => void;
+  wiki: WikiSnapshot;
+  onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
+}) {
+  const connections = getConnections(card.wikiPageId, wiki);
+  return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}>
+    <div className="detail-head"><span>{card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
+    <h2>{card.hook}</h2>
+    <section><p>核心观点</p><strong>{card.explanation}</strong></section>
+    <section><p>推理动作</p><span>{card.reasoningMove}</span></section>
+    <section><p>适用边界</p><span>{card.boundary}</span></section>
+    <section><p>为什么重要</p><span>{card.whyItMatters}</span></section>
+    {connections.length > 0 && <section className="wiki-connections"><p>在 Wiki 里</p><strong>{connections.map((connection) => connection.title).join(" · ")}</strong><span>这些连接只表示主题或阅读关联；是否支持、冲突或适用，仍需回到各自原文判断。</span></section>}
+    <div className="detail-actions">
+      {card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onEvent(card.id, "opened_source")}>打开原文</a>}
+      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "recall")}>复述</button>}
+      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "transfer")}>迁移</button>}
+      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "counter")}>反驳</button>}
+      <button onClick={onLinkQuestion}>放进问题</button>
+      {card.storyId && <button onClick={onOpenStory}>今日故事</button>}
+      <button className="remove-source" onClick={onRemoveSource}>移除来源</button>
+    </div>
+  </section>;
+}
+
+function getConnections(pageId: string | null, wiki: WikiSnapshot) {
+  if (!pageId) return [];
+  const pageById = new Map(wiki.pages.map((page) => [page.id, page]));
+  const seen = new Set<string>();
+  return wiki.links.flatMap((link) => {
+    if (link.fromPageId !== pageId && link.toPageId !== pageId) return [];
+    const otherId = link.fromPageId === pageId ? link.toPageId : link.fromPageId;
+    const page = pageById.get(otherId);
+    if (!page || seen.has(page.id)) return [];
+    seen.add(page.id);
+    return [page];
+  }).slice(0, 5);
+}
+
+function parseTags(value: string) {
+  try {
+    const tags = JSON.parse(value);
+    return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string") : [];
+  } catch {
+    return [];
+  }
+}
