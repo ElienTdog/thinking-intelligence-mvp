@@ -333,6 +333,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
           onGenerateToday={generateToday}
           onLinkQuestion={setLinkingCard}
           onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
+          onOpenSources={() => setSurface("raw")}
           onRemoveSource={(rawSourceId) => {
             const clip = data.clips.find((item) => item.id === rawSourceId);
             if (clip) void removeSource(clip);
@@ -355,6 +356,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
           onGenerateToday={generateToday}
           onLinkQuestion={setLinkingCard}
           onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
+          onOpenSources={() => setSurface("raw")}
           onRemoveSource={(rawSourceId) => {
             const clip = data.clips.find((item) => item.id === rawSourceId);
             if (clip) void removeSource(clip);

@@ -92,6 +92,18 @@ test("prioritizes followed creators while preserving feedback-driven ranking", (
   assert.equal(rankKnowledgeCards(cards, [{ cardId: "khazix", eventType: "less_like" }])[0].id, "generic");
 });
 
+test("makes missing followed-creator material visible instead of disguising it as a generic recommendation", async () => {
+  const [feed, css] = await Promise.all([
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(feed, /还没有已同步的卡兹克、赛博禅心或 MacTalk 文章/);
+  assert.match(feed, /查看收件箱与同步状态/);
+  assert.match(css, /\.followed-creator-empty/);
+  assert.match(css, /\.raw-head \{ align-items:flex-start; flex-wrap:wrap; \}/);
+  assert.match(css, /\.raw-card footer \{ display:grid/);
+});
+
 test("declares the owner-scoped feed and local Wiki mirror surfaces", async () => {
   const [schema, migration, localKnowledgeMigration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema, inboxRoute, mirrorRoute, knowledgeMirrorRoute, syncStatusRoute, tokenRoute] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
