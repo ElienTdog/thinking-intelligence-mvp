@@ -22,6 +22,7 @@ type KnowledgeFeedProps = {
   onLinkQuestion: (card: KnowledgeCard) => void;
   onRemoveSource: (rawSourceId: string) => void;
   onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
+  onOpenSources: () => void;
 };
 
 export function KnowledgeFeed({
@@ -40,8 +41,10 @@ export function KnowledgeFeed({
   onLinkQuestion,
   onRemoveSource,
   onStartPractice,
+  onOpenSources,
 }: KnowledgeFeedProps) {
   const visibleCards = mode === "story" ? storyCards : cards;
+  const followedCards = visibleCards.filter(isFollowedCreator);
   const [selected, setSelected] = useState<KnowledgeCard | null>(null);
   const seenCardId = useRef("");
 
@@ -63,6 +66,7 @@ export function KnowledgeFeed({
   return <section className="knowledge-deck" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
     <div className="knowledge-scroll">
       {mode === "feed" && wiki.review && <ReviewMomentView review={wiki.review} onPractice={onStartPractice} />}
+      {mode === "feed" && !followedCards.length && <FollowedCreatorEmpty onOpenSources={onOpenSources} />}
       {mode === "story" && story && <StoryOpening story={story} />}
       {visibleCards.map((card, index) => <KnowledgeCardView
         key={card.id}
@@ -92,6 +96,15 @@ export function KnowledgeFeed({
       onStartPractice={onStartPractice}
     />}
   </section>;
+}
+
+function FollowedCreatorEmpty({ onOpenSources }: { onOpenSources: () => void }) {
+  return <article className="followed-creator-empty">
+    <p>关注作者</p>
+    <h2>还没有已同步的卡兹克、赛博禅心或 MacTalk 文章。</h2>
+    <span>推荐不会把泛资讯伪装成你的关注内容。先把可读原文同步进本地 Wiki，它会在下一次刷新后排到推荐前面。</span>
+    <button onClick={onOpenSources}>查看收件箱与同步状态</button>
+  </article>;
 }
 
 function ReviewMomentView({ review, onPractice }: { review: ReviewMoment; onPractice: (pageId: string, promptType: LearningPromptType) => void }) {
@@ -131,6 +144,7 @@ function KnowledgeCardView({
   onOpen: () => void;
 }) {
   const tags = parseTags(card.tags);
+  const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
 
   function openSource(event: MouseEvent<HTMLAnchorElement>) {
     event.stopPropagation();
@@ -140,7 +154,7 @@ function KnowledgeCardView({
   return <article className={`knowledge-card tone-${index % 3}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
-    <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
+    <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
     <div className="knowledge-copy"><h2>{card.hook}</h2><p>{card.title}</p></div>
     <div className="knowledge-bottom">
       <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>
@@ -205,4 +219,9 @@ function parseTags(value: string) {
   } catch {
     return [];
   }
+}
+
+function isFollowedCreator(card: KnowledgeCard) {
+  const creator = parseTags(card.tags).find((tag) => tag.startsWith("creator:"))?.slice(8);
+  return creator === "数字生命卡兹克" || creator === "赛博禅心" || creator === "MacTalk" || creator === "量子位" || creator === "Datawhale";
 }

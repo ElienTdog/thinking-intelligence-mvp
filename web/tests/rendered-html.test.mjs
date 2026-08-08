@@ -83,10 +83,32 @@ test("ranks unseen cards ahead of muted cards and validates feedback", () => {
   assert.ok(validateFeedEventPayload({ cardId: "card", eventType: "invented" }).error);
 });
 
+test("prioritizes followed creators while preserving feedback-driven ranking", () => {
+  const cards = [
+    { id: "generic", tags: '["AI"]', sourceName: "普通资讯", createdAt: new Date().toISOString(), storyId: null },
+    { id: "khazix", tags: '["creator:数字生命卡兹克"]', sourceName: "数字生命卡兹克", createdAt: new Date().toISOString(), storyId: null },
+  ];
+  assert.equal(rankKnowledgeCards(cards, [])[0].id, "khazix");
+  assert.equal(rankKnowledgeCards(cards, [{ cardId: "khazix", eventType: "less_like" }])[0].id, "generic");
+});
+
+test("makes missing followed-creator material visible instead of disguising it as a generic recommendation", async () => {
+  const [feed, css] = await Promise.all([
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(feed, /还没有已同步的卡兹克、赛博禅心或 MacTalk 文章/);
+  assert.match(feed, /查看收件箱与同步状态/);
+  assert.match(css, /\.followed-creator-empty/);
+  assert.match(css, /\.raw-head \{ align-items:flex-start; flex-wrap:wrap; \}/);
+  assert.match(css, /\.raw-card footer \{ display:grid/);
+});
+
 test("declares the owner-scoped feed and local Wiki mirror surfaces", async () => {
-  const [schema, migration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema, inboxRoute, mirrorRoute, tokenRoute] = await Promise.all([
+  const [schema, migration, localKnowledgeMigration, workspace, worker, feedRoute, eventRoute, runRoute, deleteRoute, dashboard, knowledgeFeed, wikiRoute, wikiQueryRoute, wikiModel, wikiSchema, inboxRoute, mirrorRoute, knowledgeMirrorRoute, syncStatusRoute, tokenRoute] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_exotic_whirlwind.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_local_wiki_knowledge_pages.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/knowledge-workspace.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
@@ -101,6 +123,8 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
     readFile(new URL("../LLM_WIKI_SCHEMA.md", import.meta.url), "utf8"),
     readFile(new URL("../app/api/local-sync/inbox/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/local-sync/mirror/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/local-sync/knowledge/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/local-sync/status/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/local-sync/token/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(schema, /source_feeds/);
@@ -113,6 +137,8 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(schema, /wiki_activity/);
   assert.match(schema, /learning_attempts/);
   assert.match(schema, /wikiSyncTokens/);
+  assert.match(schema, /localPath: text\("local_path"\)/);
+  assert.match(localKnowledgeMigration, /wiki_pages.*local_path/s);
   assert.match(migration, /wiki_pages/);
   assert.match(migration, /wiki_links/);
   assert.match(migration, /wiki_page_id/);
@@ -150,6 +176,9 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(wikiSchema, /append-only/);
   assert.match(inboxRoute, /processing_status IN \('inbox', 'needs_clipper'\)/);
   assert.match(mirrorRoute, /local_path/);
+  assert.match(knowledgeMirrorRoute, /knowledge_cards/);
+  assert.match(knowledgeMirrorRoute, /creator:/);
+  assert.match(syncStatusRoute, /last_used_at/);
   assert.match(tokenRoute, /wikiSyncTokens/);
 });
 

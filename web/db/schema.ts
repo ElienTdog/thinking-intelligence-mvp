@@ -150,6 +150,7 @@ export const wikiPages = sqliteTable(
     evidenceStatus: text("evidence_status").notNull().default("verified"),
     recallPrompt: text("recall_prompt").notNull().default(""),
     transferPrompt: text("transfer_prompt").notNull().default(""),
+    localPath: text("local_path").notNull().default(""),
     version: integer("version").notNull().default(1),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
