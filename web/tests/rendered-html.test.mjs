@@ -160,6 +160,9 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.doesNotMatch(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
   assert.match(dashboard, /连接本地 Wiki/);
   assert.match(dashboard, /在线阅读/);
+  assert.match(dashboard, /surface === "raw" && direction === "right"/);
+  assert.match(dashboard, /surface === "story" && direction === "left"/);
+  assert.match(dashboard, /surface === "raw" \? "is-current"/);
   assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
   assert.match(deleteRoute, /knowledgeCards\.ownerId/);
   assert.match(deleteRoute, /feedEvents/);
@@ -167,6 +170,8 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(deleteRoute, /wikiPages/);
   assert.match(knowledgeFeed, /ReviewMomentView/);
   assert.match(knowledgeFeed, /在 Wiki 里/);
+  assert.match(knowledgeFeed, /knowledge-cover/);
+  assert.match(knowledgeFeed, /compactHook/);
   assert.match(wikiRoute, /getWikiLint/);
   assert.match(wikiQueryRoute, /queryWiki/);
   assert.match(wikiModel, /refreshTopicIndexes/);
@@ -179,6 +184,8 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(knowledgeMirrorRoute, /knowledge_cards/);
   assert.match(knowledgeMirrorRoute, /creator:/);
   assert.match(knowledgeMirrorRoute, /text\(digest\.transferPrompt, 1_000\)/);
+  assert.match(knowledgeMirrorRoute, /sourceCoverUrl/);
+  assert.match(knowledgeMirrorRoute, /cover_url/);
   assert.match(syncStatusRoute, /last_used_at/);
   assert.match(tokenRoute, /wikiSyncTokens/);
 });

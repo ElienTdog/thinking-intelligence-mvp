@@ -125,6 +125,7 @@ export const knowledgeCards = sqliteTable(
     reasoningMove: text("reasoning_move").notNull(),
     boundary: text("boundary").notNull(),
     whyItMatters: text("why_it_matters").notNull(),
+    coverUrl: text("cover_url").notNull().default(""),
     tags: text("tags").notNull().default("[]"),
     sourceName: text("source_name").notNull(),
     sourceUrl: text("source_url").notNull(),
