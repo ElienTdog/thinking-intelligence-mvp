@@ -124,6 +124,7 @@ export function rankKnowledgeCards(cards, events) {
     // Followed creators form the first reading lane. Explicit "less like" feedback
     // above still wins, so a user can always push an author back down.
     const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
+    // Preserve the user's explicit reading order within the followed-author lane.
     if (creator && PREFERRED_CREATORS.has(creator)) {
       score += 90 + (PREFERRED_CREATORS.size - PREFERRED_CREATORS_ORDER.indexOf(creator)) * 4;
     }
