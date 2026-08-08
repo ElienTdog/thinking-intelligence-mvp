@@ -123,13 +123,17 @@ export function rankKnowledgeCards(cards, events) {
     }
     // Followed creators form the first reading lane. Explicit "less like" feedback
     // above still wins, so a user can always push an author back down.
-    if (tags.some((tag) => tag.startsWith("creator:") && PREFERRED_CREATORS.has(tag.slice(8)))) score += 90;
+    const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
+    if (creator && PREFERRED_CREATORS.has(creator)) {
+      score += 90 + (PREFERRED_CREATORS.size - PREFERRED_CREATORS_ORDER.indexOf(creator)) * 4;
+    }
     const ageDays = Math.max(0, (Date.now() - new Date(card.createdAt).getTime()) / 86_400_000);
     return score + Math.max(0, 12 - ageDays);
   }
 }
 
-const PREFERRED_CREATORS = new Set(["数字生命卡兹克", "赛博禅心", "MacTalk", "量子位", "Datawhale"]);
+const PREFERRED_CREATORS_ORDER = ["数字生命卡兹克", "赛博禅心", "MacTalk", "量子位", "Datawhale"];
+const PREFERRED_CREATORS = new Set(PREFERRED_CREATORS_ORDER);
 
 function parseTags(value) {
   try {
