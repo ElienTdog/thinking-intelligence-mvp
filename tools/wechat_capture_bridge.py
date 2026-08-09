@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import sqlite3
 import subprocess
@@ -34,10 +35,12 @@ def now_iso() -> str:
 def normalize_url(value: str) -> str:
     parsed = urlsplit(value.strip())
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or host not in ALLOWED_HOSTS or parsed.path not in {"/s", "/s/"}:
+    path = parsed.path.rstrip("/") or "/"
+    is_article_path = path == "/s" or re.fullmatch(r"/s/[A-Za-z0-9_-]+", path) is not None
+    if parsed.scheme != "https" or host not in ALLOWED_HOSTS or not is_article_path:
         raise ValueError("only normal https://mp.weixin.qq.com/s article URLs are allowed")
     netloc = host if parsed.port is None else f"{host}:{parsed.port}"
-    return urlunsplit(("https", netloc, "/s", parsed.query, ""))
+    return urlunsplit(("https", netloc, path, parsed.query, ""))
 
 
 def url_hash(value: str) -> str:

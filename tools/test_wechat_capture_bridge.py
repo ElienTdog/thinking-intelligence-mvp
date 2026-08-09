@@ -146,6 +146,16 @@ class WechatCaptureBridgeTests(unittest.TestCase):
         self.assertNotEqual(first["job"]["jobId"], second["job"]["jobId"])
         self.assertEqual(self.server.capture_store.count(), 2)
 
+    def test_modern_path_article_urls_remain_distinct(self):
+        first_url = "https://mp.weixin.qq.com/s/XKRp5TDiPYru0GzY1roknQ"
+        second_url = "https://mp.weixin.qq.com/s/bFR52i8SZghE12fZJL4rpA"
+        first = self.request("/v1/captures", self.token, {"itemId": "path-a", "sourceUrl": first_url, "sourceTitle": "同名文章"})
+        second = self.request("/v1/captures", self.token, {"itemId": "path-b", "sourceUrl": second_url, "sourceTitle": "同名文章"})
+        self.assertEqual(first["job"]["sourceUrl"], first_url)
+        self.assertEqual(second["job"]["sourceUrl"], second_url)
+        self.assertNotEqual(first["job"]["jobId"], second["job"]["jobId"])
+        self.assertEqual(self.server.capture_store.count(), 2)
+
     def test_same_title_different_captured_urls_write_distinct_sources(self):
         first_url = "https://mp.weixin.qq.com/s?__biz=test&mid=6"
         second_url = "https://mp.weixin.qq.com/s?__biz=test&mid=7"

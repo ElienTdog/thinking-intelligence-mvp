@@ -11,7 +11,7 @@ SYNC_LABEL="com.thinking.wiki-inbox-sync"
 BRIDGE_LABEL="com.thinking.wechat-capture-bridge"
 SYNC_PLIST="$HOME/Library/LaunchAgents/$SYNC_LABEL.plist"
 BRIDGE_PLIST="$HOME/Library/LaunchAgents/$BRIDGE_LABEL.plist"
-PYTHON="$(command -v python3)"
+PYTHON="$(python3 -c 'import os, sys; print(os.path.realpath(sys.executable))')"
 DOMAIN="gui/$(id -u)"
 
 security find-generic-password -a wiki-sync -s thinking-wiki-sync -w >/dev/null
