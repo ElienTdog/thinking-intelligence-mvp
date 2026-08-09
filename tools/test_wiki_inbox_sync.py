@@ -109,6 +109,27 @@ class WikiInboxSyncTests(unittest.TestCase):
         private.write_bytes(b"\x89PNG\r\n\x1a\n" + b"private")
         self.assertEqual(MODULE.first_markdown_image("![[private.png]]", root), "")
 
+    def test_knowledge_mirror_uses_small_idempotent_batches(self):
+        root = self.make_root()
+        items = [{"sourceLocalPath": f"wiki/source-{index}.md"} for index in range(7)]
+        batches = []
+        original_items = MODULE.maintained_knowledge_items
+        original_request = MODULE.request_json
+        try:
+            MODULE.maintained_knowledge_items = lambda _root: items
+
+            def fake_request(_url, _token, payload, _bypass):
+                batches.append(payload["items"])
+                return {"mirrored": payload["items"]}
+
+            MODULE.request_json = fake_request
+            mirrored = MODULE.sync_maintained_knowledge(root, "https://private.example", "token", "bypass")
+        finally:
+            MODULE.maintained_knowledge_items = original_items
+            MODULE.request_json = original_request
+        self.assertEqual([len(batch) for batch in batches], [3, 3, 1])
+        self.assertEqual(mirrored, {item["sourceLocalPath"] for item in items})
+
     def test_captured_source_flows_through_deepseek_input_and_mirror_payload(self):
         root = self.make_root()
         self.prepare_maintainer_root(root)

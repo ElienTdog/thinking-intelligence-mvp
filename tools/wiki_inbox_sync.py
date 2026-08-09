@@ -595,13 +595,21 @@ def sync_maintained_knowledge(root: Path, server: str, token: str, site_bypass_t
     items = maintained_knowledge_items(root)
     if not items:
         return set()
-    response = request_json(f"{server.rstrip('/')}/api/local-sync/knowledge", token, {"items": items}, site_bypass_token)
-    mirrored = response.get("mirrored", []) if isinstance(response, dict) else []
-    return {
-        str(item.get("sourceLocalPath", ""))
-        for item in mirrored
-        if isinstance(item, dict) and item.get("sourceLocalPath")
-    }
+    mirrored_paths: set[str] = set()
+    for offset in range(0, len(items), 3):
+        response = request_json(
+            f"{server.rstrip('/')}/api/local-sync/knowledge",
+            token,
+            {"items": items[offset:offset + 3]},
+            site_bypass_token,
+        )
+        mirrored = response.get("mirrored", []) if isinstance(response, dict) else []
+        mirrored_paths.update(
+            str(item.get("sourceLocalPath", ""))
+            for item in mirrored
+            if isinstance(item, dict) and item.get("sourceLocalPath")
+        )
+    return mirrored_paths
 
 
 def finalize_records(
