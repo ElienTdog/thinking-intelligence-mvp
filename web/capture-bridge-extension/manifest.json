@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Thinking Wiki WeChat Capture",
+  "version": "0.1.0",
+  "description": "Captures user-visible WeChat articles for the local Thinking Wiki.",
+  "permissions": ["alarms", "storage", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://mp.weixin.qq.com/*",
+    "https://mmbiz.qpic.cn/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://mp.weixin.qq.com/s*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "options_page": "options.html",
+  "action": { "default_title": "Thinking Wiki 微信采集桥" }
+}

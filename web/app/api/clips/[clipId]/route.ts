@@ -3,6 +3,18 @@ import { getDb } from "../../../../db";
 import { clips, dailyStories, feedEvents, knowledgeCards, learningAttempts, wikiActivity, wikiLinks, wikiPageSources, wikiPages } from "../../../../db/schema";
 import { requireApiUser } from "../../auth";
 
+export async function PATCH(_request: Request, context: { params: Promise<{ clipId: string }> }) {
+  const auth = await requireApiUser();
+  if ("error" in auth) return auth.error;
+  const { clipId } = await context.params;
+  const result = await getDb().update(clips)
+    .set({ processingStatus: "queued", processingError: "等待本机浏览器重新采集", processedAt: "" })
+    .where(and(eq(clips.id, clipId), eq(clips.ownerId, auth.user.userId), inArray(clips.processingStatus, ["needs_user_open", "needs_clipper", "failed"])))
+    .returning({ id: clips.id, processingStatus: clips.processingStatus });
+  if (!result.length) return Response.json({ error: "source is not retryable" }, { status: 409 });
+  return Response.json({ clip: result[0] });
+}
+
 export async function DELETE(_request: Request, context: { params: Promise<{ clipId: string }> }) {
   const auth = await requireApiUser();
   if ("error" in auth) return auth.error;

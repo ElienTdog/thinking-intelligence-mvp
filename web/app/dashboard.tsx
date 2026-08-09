@@ -11,10 +11,10 @@ type WikiLint = {
   missingSources: Array<{ id: string; title: string }>;
   unverified: Array<{ id: string; title: string }>;
 };
-type SyncStatus = { connected: boolean; lastUsedAt: string; inbox: number; needsClipper: number; mirrored: number };
+type SyncStatus = { connected: boolean; lastUsedAt: string; queued: number; loading: number; captured: number; maintaining: number; needsUserOpen: number; failed: number; mirrored: number };
 
-async function requestJson(path: string, body?: unknown, method: "POST" | "DELETE" = "POST") {
-  const response = await fetch(path, method === "DELETE" ? { method } : body === undefined ? undefined : {
+async function requestJson(path: string, body?: unknown, method: "POST" | "PATCH" | "DELETE" = "POST") {
+  const response = await fetch(path, method === "DELETE" || method === "PATCH" ? { method } : body === undefined ? undefined : {
     method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -55,6 +55,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [captureContent, setCaptureContent] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [removingId, setRemovingId] = useState("");
+  const [retryingId, setRetryingId] = useState("");
   const [linkingCard, setLinkingCard] = useState<KnowledgeCard | null>(null);
   const [practice, setPractice] = useState<{ pageId: string; promptType: LearningPromptType } | null>(null);
   const [showWiki, setShowWiki] = useState(false);
@@ -90,7 +91,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       const result = await requestJson("/api/clips", { content: value }) as { duplicate?: boolean };
       setCaptureContent("");
       setShowCapture(false);
-      setNotice(result.duplicate ? "这条来源已经在收件箱里了。" : "已进入来源收件箱，等待本地 Wiki 助手处理。 ");
+      setNotice(result.duplicate ? "这条来源已经在收件箱里了。" : "已排队，Mac 上的浏览器采集桥会继续处理。 ");
       await load();
     } catch (error) {
       setCaptureContent(value);
@@ -102,6 +103,12 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (surface !== "raw") return;
+    const timer = window.setInterval(() => { void load(); }, 6000);
+    return () => window.clearInterval(timer);
+  }, [load, surface]);
 
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get("capture");
@@ -156,6 +163,19 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       setRemovingId("");
     }
   }, []);
+
+  const retrySource = useCallback(async (clip: Clip) => {
+    setRetryingId(clip.id);
+    try {
+      await requestJson(`/api/clips/${clip.id}`, undefined, "PATCH");
+      setNotice("已重新排队，等待本机浏览器采集桥。 ");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "暂时无法重试采集");
+    } finally {
+      setRetryingId("");
+    }
+  }, [load]);
 
   const connectToQuestion = useCallback(async (question: Question) => {
     if (!linkingCard) return;
@@ -315,7 +335,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       aria-live="polite"
     >
       <section className="surface-panel" aria-hidden={surface !== "raw"}>
-        <RawSurface clips={data.clips} syncStatus={syncStatus} removingId={removingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
+        <RawSurface clips={data.clips} syncStatus={syncStatus} removingId={removingId} retryingId={retryingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onRetry={retrySource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
       </section>
       <section className="surface-panel" aria-hidden={surface !== "feed"}>
         <KnowledgeFeed
@@ -398,36 +418,49 @@ function CaptureSheet({ content, onContentChange, onCaptureClipboard, onClose, o
   </section>;
 }
 
-function RawSurface({ clips, syncStatus, removingId, onCapture, onRemove, onOpenWiki, onConnect, onRead }: {
+function RawSurface({ clips, syncStatus, removingId, retryingId, onCapture, onRemove, onRetry, onOpenWiki, onConnect, onRead }: {
   clips: Clip[];
   syncStatus: SyncStatus | null;
   removingId: string;
+  retryingId: string;
   onCapture: () => void;
   onRemove: (clip: Clip) => void;
+  onRetry: (clip: Clip) => void;
   onOpenWiki: () => void;
   onConnect: () => void;
   onRead: (clip: Clip) => void;
 }) {
   const labels: Record<Clip["processingStatus"], string> = {
     legacy: "旧收录",
-    inbox: "等待本地入库",
-    mirrored: "已维护并镜像",
-    needs_clipper: "等待你剪藏",
-    queued: "等待编译",
+    inbox: "等待迁移",
+    needs_clipper: "需你打开",
+    queued: "已排队",
+    loading: "浏览器加载中",
+    captured: "正文已获取",
+    maintaining: "DeepSeek 维护中",
+    mirrored: "已镜像",
+    needs_user_open: "需你打开",
     processing: "正在编译",
     compiled: "已编译",
     skipped: "停留在 Raw",
     failed: "编译失败",
   };
-  const syncLabel = !syncStatus ? "正在读取同步状态" : syncStatus.connected ? `已镜像 ${syncStatus.mirrored} 条` : "尚未连接本地 Wiki";
+  const activeCount = syncStatus ? syncStatus.queued + syncStatus.loading + syncStatus.captured + syncStatus.maintaining : 0;
+  const syncLabel = !syncStatus ? "正在读取同步状态" : syncStatus.connected ? `处理中 ${activeCount} · 需打开 ${syncStatus.needsUserOpen} · 已镜像 ${syncStatus.mirrored}` : "尚未连接本地 Wiki";
   return <section className="raw-surface" aria-label="来源收件箱">
     <header className="raw-head"><div><p>来源收件箱</p><span>{clips.length} 条来源；{syncLabel}</span></div><div className="raw-head-actions"><button className="raw-index-trigger" onClick={onOpenWiki} aria-label="打开知识索引" title="知识索引与自检">⌘</button><button className="raw-sync-trigger" onClick={onConnect} aria-label="连接本地 Wiki" title="连接本地 Wiki">⌁</button><button onClick={onCapture} aria-label="收录来源" title="收录来源">+</button></div></header>
     {clips.length ? <div className="raw-grid">{clips.map((clip) => <article className="raw-card" key={clip.id}>
       <div className="raw-card-top"><span>{labels[clip.processingStatus]}</span><button onClick={() => onRemove(clip)} disabled={removingId === clip.id}>{removingId === clip.id ? "移除中" : "移除"}</button></div>
       <h2>{clipTitle(clip)}</h2>
       <p>{clipPreview(clip)}</p>
-      <footer>{clip.sourceUrl ? <a href={clip.sourceUrl} target="_blank" rel="noreferrer">{clip.publisher || "打开原文"}</a> : <span>主动收录</span>}<span>{clip.localPath ? `Wiki：${clip.localPath}` : clip.verificationStatus === "official_link" ? "公众号原文待验证" : "尚未入库"}</span></footer>
-      {clip.processingStatus === "mirrored" && <button className="raw-read" onClick={() => onRead(clip)}>在线阅读</button>}
+      {clip.processingError && <p className="raw-error">{clip.processingError}</p>}
+      <footer><span>{clip.localPath ? `Wiki：${clip.localPath}` : clip.processingStatus === "needs_user_open" || clip.processingStatus === "needs_clipper" ? "正文尚未获取" : "等待本地写入"}</span></footer>
+      <div className="raw-card-actions">
+        {clip.sourceUrl && (clip.processingStatus === "needs_user_open" || clip.processingStatus === "needs_clipper") && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">在浏览器打开</a>}
+        {clip.sourceUrl && clip.processingStatus !== "needs_user_open" && clip.processingStatus !== "needs_clipper" && <a href={clip.sourceUrl} target="_blank" rel="noreferrer">打开原文</a>}
+        {["captured", "maintaining", "mirrored"].includes(clip.processingStatus) && <button className="raw-read" onClick={() => onRead(clip)}>在线阅读</button>}
+        {["needs_user_open", "needs_clipper", "failed"].includes(clip.processingStatus) && <button className="raw-retry" onClick={() => onRetry(clip)} disabled={retryingId === clip.id}>{retryingId === clip.id ? "重新排队中" : "重试采集"}</button>}
+      </div>
     </article>)}</div> : <div className="raw-empty"><p>还没有 Raw。</p><button onClick={onCapture}>收录第一条</button></div>}
   </section>;
 }

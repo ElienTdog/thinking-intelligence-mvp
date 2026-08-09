@@ -26,14 +26,16 @@ export async function POST(request: Request) {
   if (!items.length) return Response.json({ error: "items are required" }, { status: 400 });
 
   const mirrored: Array<{ id: string; processingStatus: string }> = [];
+  const allowedStatuses = new Set(["queued", "loading", "captured", "maintaining", "mirrored", "needs_user_open", "failed"]);
   for (const item of items) {
     const id = text(item.id, 100);
     const sourceUrl = text(item.sourceUrl, 2_000);
     const content = text(item.content, 180_000);
     const sourceTitle = text(item.sourceTitle, 280) || sourceUrl || "未命名来源";
-    const processingStatus = ["mirrored", "needs_clipper", "failed"].includes(text(item.processingStatus, 40))
-      ? text(item.processingStatus, 40)
-      : "mirrored";
+    const processingStatus = text(item.processingStatus, 40);
+    if (!allowedStatuses.has(processingStatus)) {
+      return Response.json({ error: `invalid processing status: ${processingStatus || "empty"}` }, { status: 400 });
+    }
     const verificationStatus = ["verified", "official_link", "needs_transcript", "unknown"].includes(text(item.verificationStatus, 40))
       ? text(item.verificationStatus, 40)
       : "unknown";

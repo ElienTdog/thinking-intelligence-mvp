@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       publisher, published_at AS publishedAt, verification_status AS verificationStatus,
       processing_status AS processingStatus, processing_error AS processingError, created_at AS createdAt
     FROM clips
-    WHERE owner_id = ? AND processing_status IN ('inbox', 'needs_clipper')
+    WHERE owner_id = ? AND processing_status IN ('inbox', 'needs_clipper', 'queued', 'loading', 'captured', 'maintaining', 'needs_user_open', 'failed')
     ORDER BY created_at ASC
     LIMIT 40
   `).bind(ownerId).all();

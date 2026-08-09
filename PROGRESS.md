@@ -1,12 +1,8 @@
-# MVP 1.0 progress
+# 微信公众号采集闭环进度
 
-- Goal: publish auditable code while keeping the personal Markdown vault private.
-- Order: lock down ignored data, build the D1-backed private workbench, validate, then publish and deploy.
-- Baseline on 2026-08-03: Python tests 91 passed / 1 skipped; local lint passed; Web tests 2 passed; Web lint passed.
-- Largest risk: GitHub CLI/authentication and deployment credentials are not present locally.
-- The online Alpha starts empty and does not import material from `thinking/`.
-- Privacy reverse check: `git check-ignore -v thinking/active-questions.md` identifies root `.gitignore`.
-- Validation reverse check: an inverted missing-scenario assertion failed with `intentional reverse check: missing scenario was rejected`; the restored check passed with `validationScenario is required for validate_in_context`.
-- Web implementation: D1 schema and migration generated; build, 5 Web tests, and lint pass when run sequentially.
-- GitHub CLI is absent, but the authenticated browser created the public `ElienTdog/thinking-intelligence-mvp` repository. The local Git author will use that account's public noreply identity only for this repository.
-- A real private-site write uncovered and fixed an async React form-reset bug before the final verification pass.
+- 目标：前端贴公众号链接后，由本机授权浏览器采集正文，写入本地 Wiki，经 DeepSeek 维护后镜像为线上推荐卡。
+- 顺序：基线与边界 -> 本地采集桥 -> Wiki/DeepSeek/镜像状态机 -> 收件箱交互 -> 5 条真实链接验收与隐私审计。
+- 最大风险：微信页面可能要求登录、验证码或用户在授权浏览器中主动打开；受限时必须停在“需用户打开”，不得生成正文或知识页。
+- 2026-08-09 基线：Python 106 项通过、1 项既有 skip；前端 14 项通过。
+- 当前：任务 0-3 已实现；采集桥真实 HTTP 验收 12 项通过，DeepSeek/镜像集成 12 项通过，前端 15 项通过。
+- 待完成：完整回归与隐私审计、部署、安装浏览器扩展，并用线上现有 5 条链接做一次真实闭环验收。

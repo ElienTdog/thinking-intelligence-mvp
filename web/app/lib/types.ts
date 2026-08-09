@@ -27,7 +27,7 @@ export type Clip = {
   publisher: string;
   publishedAt: string;
   verificationStatus: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";
-  processingStatus: "legacy" | "inbox" | "mirrored" | "needs_clipper" | "queued" | "processing" | "compiled" | "skipped" | "failed";
+  processingStatus: "legacy" | "inbox" | "needs_clipper" | "queued" | "loading" | "captured" | "maintaining" | "mirrored" | "needs_user_open" | "processing" | "compiled" | "skipped" | "failed";
   rawExcerpt: string;
   contentHash: string;
   priority: number;
