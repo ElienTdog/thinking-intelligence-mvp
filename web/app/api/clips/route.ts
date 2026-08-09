@@ -28,11 +28,11 @@ export async function POST(request: Request) {
     sourceType,
     publisher: publisherFromUrl(checked.value.sourceUrl),
     verificationStatus: "unknown",
-    processingStatus: "inbox",
+    processingStatus: "queued",
     rawExcerpt: "",
     contentHash,
     priority: 10,
-    processingError: "等待本地 Wiki 助手处理",
+    processingError: "等待本机浏览器采集桥",
   }).returning();
   return Response.json({ clip }, { status: 201 });
 }

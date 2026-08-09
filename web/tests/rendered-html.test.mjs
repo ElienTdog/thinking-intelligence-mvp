@@ -181,8 +181,10 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(wikiSchema, /Raw layer/);
   assert.match(wikiSchema, /Story Mode/);
   assert.match(wikiSchema, /append-only/);
-  assert.match(inboxRoute, /processing_status IN \('inbox', 'needs_clipper'\)/);
+  assert.match(inboxRoute, /'queued', 'loading', 'captured', 'maintaining', 'needs_user_open', 'failed'/);
   assert.match(mirrorRoute, /local_path/);
+  assert.match(mirrorRoute, /allowedStatuses/);
+  assert.doesNotMatch(mirrorRoute, /: "mirrored"/);
   assert.match(knowledgeMirrorRoute, /knowledge_cards/);
   assert.match(knowledgeMirrorRoute, /creator:/);
   assert.match(knowledgeMirrorRoute, /text\(digest\.transferPrompt, 1_000\)/);
@@ -192,18 +194,46 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(tokenRoute, /wikiSyncTokens/);
 });
 
-test("keeps official WeChat links out of automatic compilation", async () => {
-  const [injection, dashboard, clipRoute] = await Promise.all([
+test("routes official WeChat links through the local capture lifecycle", async () => {
+  const [injection, dashboard, clipRoute, retryRoute, css] = await Promise.all([
     readFile(new URL("../app/lib/injection.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/clips/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clips/[clipId]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
   assert.match(injection, /official_link/);
   assert.match(injection, /环境异常|完成验证后即可继续访问/);
   assert.match(injection, /isWechatArticleUrl/);
-  assert.match(dashboard, /公众号原文待验证/);
+  assert.match(dashboard, /浏览器加载中/);
+  assert.match(dashboard, /正文已获取/);
+  assert.match(dashboard, /DeepSeek 维护中/);
+  assert.match(dashboard, /需你打开/);
+  assert.match(dashboard, /重试采集/);
+  assert.match(dashboard, /processingError/);
   assert.doesNotMatch(clipRoute, /compileQueuedSources/);
-  assert.match(clipRoute, /processingStatus: "inbox"/);
+  assert.match(clipRoute, /processingStatus: "queued"/);
+  assert.match(retryRoute, /export async function PATCH/);
+  assert.match(retryRoute, /needs_user_open/);
+  assert.match(css, /@media \(max-width:393px\)/);
+  assert.match(css, /\.raw-card-actions \{ min-width:0; display:flex; flex-wrap:wrap/);
+});
+
+test("declares a token-protected loopback WeChat capture extension", async () => {
+  const [manifest, background, content] = await Promise.all([
+    readFile(new URL("../capture-bridge-extension/manifest.json", import.meta.url), "utf8"),
+    readFile(new URL("../capture-bridge-extension/background.js", import.meta.url), "utf8"),
+    readFile(new URL("../capture-bridge-extension/content.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(manifest, /127\.0\.0\.1:8765/);
+  assert.match(manifest, /mp\.weixin\.qq\.com/);
+  assert.match(background, /Authorization: `Bearer \$\{config\.token\}`/);
+  assert.match(background, /\/v1\/extension\/jobs\/next/);
+  assert.match(background, /chrome\.alarms\.onAlarm/);
+  assert.doesNotMatch(background, /setInterval/);
+  assert.match(content, /#js_content/);
+  assert.match(content, /needs_user_open/);
+  assert.doesNotMatch(background, /cookie|profile/i);
 });
 
 test("refuses cross-owner and mismatched-material writes", () => {

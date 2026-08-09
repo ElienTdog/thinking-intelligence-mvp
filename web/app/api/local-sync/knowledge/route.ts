@@ -67,8 +67,9 @@ export async function POST(request: Request) {
     const sourceName = text(item.sourceName, 280) || "本地 Wiki";
     const sourceCoverUrl = text(item.sourceCoverUrl, 2_000);
     const digest = item.digest;
-    if (!sourceLocalPath || !sourceContent || !sourceTitle || !digest) continue;
-    const existingClip = await env.DB.prepare("SELECT id FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string }>();
+    if (!sourceLocalPath || sourceContent.length < 900 || !sourceTitle || !digest) continue;
+    const existingClip = await env.DB.prepare("SELECT id, processing_status AS processingStatus FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string; processingStatus: string }>();
+    if (existingClip && !["captured", "maintaining", "mirrored"].includes(existingClip.processingStatus)) continue;
     const rawSourceId = existingClip?.id ?? crypto.randomUUID();
     if (existingClip) {
       await env.DB.prepare("UPDATE clips SET content = ?, source_url = ?, source_title = ?, publisher = ?, published_at = ?, verification_status = 'verified', processing_status = 'mirrored', raw_excerpt = ?, content_hash = ?, mirror_updated_at = CURRENT_TIMESTAMP, processed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?")
