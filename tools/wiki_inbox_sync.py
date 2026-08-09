@@ -36,6 +36,7 @@ DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 USER_AGENT = "thinking-wiki-local-sync/0.1"
 RESTRICTED_HOSTS = {"mp.weixin.qq.com", "xiaohongshu.com", "www.xiaohongshu.com"}
 DEFAULT_CREATORS = ["数字生命卡兹克", "赛博禅心", "量子位", "Datawhale", "MacTalk"]
+MAX_COVER_BYTES = 500_000
 
 
 @dataclass
@@ -489,7 +490,39 @@ def markdown_list(content: str, heading: str) -> list[str]:
     return [clean_text(line.removeprefix("- ")) for line in section.splitlines() if line.startswith("- ")][:4]
 
 
-def first_markdown_image(content: str) -> str:
+def local_cover_data_url(root: Path, content: str) -> str:
+    match = re.search(r"!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]", content)
+    if not match:
+        return ""
+    assets_root = (root / "wiki" / "01 原始材料" / "_assets").resolve()
+    image_path = (root / match.group(1).strip()).resolve()
+    try:
+        image_path.relative_to(assets_root)
+    except ValueError:
+        return ""
+    if not image_path.is_file() or image_path.stat().st_size > MAX_COVER_BYTES:
+        return ""
+    mime_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
+    mime_type = mime_types.get(image_path.suffix.lower(), "")
+    data = image_path.read_bytes()
+    _, valid = valid_image_bytes(mime_type, data)
+    if not valid:
+        return ""
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def first_markdown_image(content: str, root: Path | None = None) -> str:
+    if root:
+        local_cover = local_cover_data_url(root, content)
+        if local_cover:
+            return local_cover
     match = re.search(r"!\[[^\]]*\]\((https?://[^)\s]+)\)", content)
     if not match:
         return ""
@@ -535,7 +568,7 @@ def maintained_knowledge_items(root: Path) -> list[dict[str, Any]]:
             "sourceUrl": source_url,
             "sourceName": source_author(source_content) or "本地 Wiki",
             "publishedAt": frontmatter_value(source_content, "published") or markdown_value(source_content, "发布时间"),
-            "sourceCoverUrl": first_markdown_image(source_content),
+            "sourceCoverUrl": first_markdown_image(source_content, root),
             "digest": {
                 "localPath": markdown_relative(root, digest_path),
                 "title": markdown_title(digest_content) or digest_path.stem,

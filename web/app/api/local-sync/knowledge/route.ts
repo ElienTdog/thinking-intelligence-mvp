@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     const sourceTitle = text(item.sourceTitle, 280);
     const sourceUrl = text(item.sourceUrl, 2_000);
     const sourceName = text(item.sourceName, 280) || "本地 Wiki";
-    const sourceCoverUrl = text(item.sourceCoverUrl, 2_000);
+    const sourceCoverUrl = text(item.sourceCoverUrl, 700_000);
     const digest = item.digest;
     if (!sourceLocalPath || sourceContent.length < 900 || !sourceTitle || !digest) continue;
     const existingClip = await env.DB.prepare("SELECT id, processing_status AS processingStatus FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string; processingStatus: string }>();

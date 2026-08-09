@@ -189,6 +189,7 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(knowledgeMirrorRoute, /creator:/);
   assert.match(knowledgeMirrorRoute, /text\(digest\.transferPrompt, 1_000\)/);
   assert.match(knowledgeMirrorRoute, /sourceCoverUrl/);
+  assert.match(knowledgeMirrorRoute, /text\(item\.sourceCoverUrl, 700_000\)/);
   assert.match(knowledgeMirrorRoute, /cover_url/);
   assert.match(syncStatusRoute, /last_used_at/);
   assert.match(tokenRoute, /wikiSyncTokens/);

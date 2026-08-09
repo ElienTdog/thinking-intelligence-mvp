@@ -94,6 +94,21 @@ class WikiInboxSyncTests(unittest.TestCase):
         self.assertEqual(MODULE.first_markdown_image(hotlink), "")
         self.assertEqual(MODULE.first_markdown_image(safe_image), "https://images.example.com/cover.png")
 
+    def test_local_obsidian_image_becomes_a_private_inline_cover(self):
+        root = self.make_root()
+        image = root / "wiki/01 原始材料/_assets/wechat/cover.png"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"cover-bytes")
+        cover = MODULE.first_markdown_image("![[wiki/01 原始材料/_assets/wechat/cover.png]]", root)
+        self.assertTrue(cover.startswith("data:image/png;base64,"))
+        self.assertEqual(MODULE.base64.b64decode(cover.split(",", 1)[1]), image.read_bytes())
+
+    def test_local_cover_cannot_escape_the_assets_directory(self):
+        root = self.make_root()
+        private = root / "private.png"
+        private.write_bytes(b"\x89PNG\r\n\x1a\n" + b"private")
+        self.assertEqual(MODULE.first_markdown_image("![[private.png]]", root), "")
+
     def test_captured_source_flows_through_deepseek_input_and_mirror_payload(self):
         root = self.make_root()
         self.prepare_maintainer_root(root)
