@@ -152,6 +152,10 @@ class WikiInboxSyncTests(unittest.TestCase):
                 "relation": "support；补充了从采集到验证的完整证据链。",
                 "relatedQuestionIds": ["Q1"],
                 "understandingQuestion": "这会改变你下一次使用 AI 的哪项验证？",
+                "units": [{
+                    "title": f"证据链知识点 {index}", "hook": "先保留可追溯原文", "explanation": "来源说明了采集、维护与验证的顺序", "topic": f"证据链 {index}",
+                    "subtopics": ["原文验证"], "format": "方法", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "先证据后提炼", "boundary": "仅适用于可读已核验来源", "whyItMatters": "避免把摘要当成原文", "sourceEvidence": "原文的采集与验证段落",
+                } for index in range(3)],
                 "updates": [],
             }
             return {"choices": [{"message": {"content": json.dumps(plan, ensure_ascii=False)}}]}

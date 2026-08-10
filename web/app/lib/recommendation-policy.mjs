@@ -86,10 +86,11 @@ export function recommendTopicSlate(cards, modelJson = "", options = {}) {
   const topicCounts = new Map();
   const creatorCounts = new Map();
   const degradedReasons = new Set();
-  const topicCap = Math.max(1, Math.floor(size * MAX_TOPIC_SHARE));
-  const creatorCap = Math.max(1, Math.ceil(size * MAX_CREATOR_SHARE));
 
   while (selected.length < size && remaining.length) {
+    const prefixSize = selected.length + 1;
+    const topicCap = Math.max(1, Math.ceil(prefixSize * MAX_TOPIC_SHARE));
+    const creatorCap = Math.max(1, Math.ceil(prefixSize * MAX_CREATOR_SHARE));
     const strict = remaining.filter((card) => eligible(card, selected, topicCounts, creatorCounts, topicCap, creatorCap));
     let pool = strict;
     if (!pool.length) {

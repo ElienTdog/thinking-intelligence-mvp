@@ -398,3 +398,14 @@ test("mirrors DeepSeek units without a long-running model call in the site reque
   assert.match(route, /item\.units/);
   assert.doesNotMatch(route, /compileKnowledgeUnits|DEEPSEEK_API_KEY/);
 });
+
+test("balances trusted creators throughout the visible prefix, not only at slate end", async () => {
+  const { MAX_CREATOR_SHARE, recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const preferred = topicCards(["A", "B", "C", "D"], 5, "数字生命卡兹克", "preferred");
+  const others = topicCards(["E", "F", "G", "H"], 5, "其他作者", "other");
+  const slate = recommendTopicSlate([...preferred, ...others], "", { seed: "prefix-balance", size: 20 });
+  for (let length = 2; length <= slate.items.length; length += 1) {
+    const trusted = slate.items.slice(0, length).filter((item) => item.card.sourceName === "数字生命卡兹克").length;
+    assert.ok(trusted <= Math.ceil(length * MAX_CREATOR_SHARE));
+  }
+});

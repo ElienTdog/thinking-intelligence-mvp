@@ -45,6 +45,23 @@ def clean_text(value: object, limit: int = 0) -> str:
     return text[:limit] if limit else text
 
 
+def parse_json_object(content: str, error_message: str) -> dict[str, Any]:
+    candidate = content.strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*", "", candidate, count=1, flags=re.IGNORECASE)
+        candidate = re.sub(r"\s*```$", "", candidate, count=1)
+    start, end = candidate.find("{"), candidate.rfind("}")
+    if start >= 0 and end >= start:
+        candidate = candidate[start:end + 1]
+    try:
+        result = json.loads(candidate)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(error_message) from error
+    if not isinstance(result, dict):
+        raise RuntimeError(error_message)
+    return result
+
+
 def safe_filename(value: str) -> str:
     compact = re.sub(r"[\\/:*?\"<>|]+", " ", value).strip()
     compact = re.sub(r"\s+", " ", compact).strip(" .")
@@ -210,13 +227,22 @@ existingPages：
     }
     response = post_json(payload, api_key)
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(response, dict) else ""
+    result = parse_json_object(content, "DeepSeek 没有返回可解析的维护计划")
     try:
-        result = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("DeepSeek 没有返回可解析的维护计划") from error
-    if not isinstance(result, dict):
-        raise RuntimeError("DeepSeek 返回的维护计划格式错误")
-    if "units" in result:
+        validate_knowledge_units(result)
+    except RuntimeError:
+        repair_payload = {
+            **payload,
+            "messages": [
+                *payload["messages"],
+                {"role": "assistant", "content": content},
+                {"role": "user", "content": "上一份 JSON 的 units 不合格。请保留有依据的内容，将 units 修正为 3–6 个彼此不同的知识单元，并为每个单元补齐 title、hook、explanation、topic、subtopics、format、difficulty、novelty、reasoningMove、boundary、whyItMatters、sourceEvidence。只输出完整修正后的 JSON。"},
+            ],
+            "max_tokens": 6000,
+        }
+        repaired = post_json(repair_payload, api_key)
+        repaired_content = repaired.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(repaired, dict) else ""
+        result = parse_json_object(repaired_content, "DeepSeek 修复后仍未返回可解析的维护计划")
         validate_knowledge_units(result)
     return result
 
@@ -392,18 +418,27 @@ def append_log(root: Path, source_path: Path, pages: list[tuple[Path, str]], que
         )
 
 
-def pending_sources(root: Path, state: dict[str, Any], force: bool = False) -> list[Path]:
+def source_creator(content: str) -> str:
+    match = re.search(r"^author:\s*\n\s*-\s*[\"']?\[\[(.+?)\]\][\"']?\s*$", content, re.MULTILINE)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"^(?:-\s*)?作者/机构：\s*(.+?)\s*$", content, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def pending_sources(root: Path, state: dict[str, Any], force: bool = False, creators: set[str] | None = None) -> list[Path]:
     known = state["sources"]
     return [
         path for path in raw_sources(root)
-        if force or known.get(path.relative_to(root).as_posix(), {}).get("hash") != source_hash(path.read_text(encoding="utf-8"))
+        if (not creators or source_creator(path.read_text(encoding="utf-8")) in creators)
+        and (force or known.get(path.relative_to(root).as_posix(), {}).get("hash") != source_hash(path.read_text(encoding="utf-8")))
     ]
 
 
-def maintain(root: Path, api_key: str, model: str, limit: int = 3, force: bool = False) -> tuple[int, int]:
+def maintain(root: Path, api_key: str, model: str, limit: int = 3, force: bool = False, creators: set[str] | None = None) -> tuple[int, int]:
     state = read_state(root)
     known = state["sources"]
-    pending = pending_sources(root, state, force)
+    pending = pending_sources(root, state, force, creators)
     if limit > 0:
         pending = pending[:limit]
     processed = 0
@@ -433,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--limit", type=int, default=3, help="每次最多维护几篇；0 表示全部")
     parser.add_argument("--force", action="store_true", help="重新维护已处理过的原文")
+    parser.add_argument("--creator", action="append", default=[], help="只维护指定作者；可重复使用")
     parser.add_argument("--reindex", action="store_true", help="根据已有维护状态重建索引中的 DeepSeek 区块")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -441,14 +477,15 @@ def main(argv: list[str] | None = None) -> int:
         update_index(root, index_pages_from_state(root, read_state(root)))
         print("DeepSeek Wiki index refreshed")
         return 0
-    pending = pending_sources(root, read_state(root), args.force)
+    creators = {creator.strip() for creator in args.creator if creator.strip()}
+    pending = pending_sources(root, read_state(root), args.force, creators)
     if args.dry_run:
         for path in pending[:args.limit or None]:
             print(f"would maintain: {path.relative_to(root)}")
         return 0
     try:
         api_key = load_api_key()
-        processed, _ = maintain(root, api_key, args.model, args.limit, args.force)
+        processed, _ = maintain(root, api_key, args.model, args.limit, args.force, creators)
     except RuntimeError as error:
         print(f"DeepSeek Wiki maintenance failed: {error}", file=sys.stderr)
         return 1

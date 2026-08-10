@@ -137,3 +137,38 @@ class WikiDeepSeekMaintainerTests(unittest.TestCase):
         marker = re.search(r"<!-- deepseek-knowledge-units\s*\n(.*?)\n-->", content, re.DOTALL)
         self.assertIsNotNone(marker)
         self.assertEqual(len(json.loads(marker.group(1))), 3)
+
+    def test_pending_sources_can_be_limited_to_followed_creator(self):
+        root = self.make_root()
+        first = root / "wiki/01 原始材料/卡兹克.md"
+        second = root / "wiki/01 原始材料/其他.md"
+        first.write_text('---\nsource: "https://example.com/a"\nauthor:\n  - "[[数字生命卡兹克]]"\n---\n\n## 原文\n\n' + "正文" * 500, encoding="utf-8")
+        second.write_text('---\nsource: "https://example.com/b"\nauthor:\n  - "[[其他作者]]"\n---\n\n## 原文\n\n' + "正文" * 500, encoding="utf-8")
+        pending = MODULE.pending_sources(root, {"sources": {}}, creators={"数字生命卡兹克"})
+        self.assertEqual(pending, [first])
+
+    def test_maintenance_plan_asks_deepseek_once_to_repair_invalid_units(self):
+        root = self.make_root()
+        source = root / "wiki/01 原始材料/文章.md"
+        source.write_text('---\nsource: "https://example.com"\n---\n\n## 原文\n\n' + "正文" * 500, encoding="utf-8")
+        base = {"hook": "入口", "explanation": "解释", "topic": "主题", "subtopics": [], "format": "方法", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "对照", "boundary": "边界", "whyItMatters": "重要", "sourceEvidence": "原文段落"}
+        responses = [
+            {"units": [{"title": "不完整"}]},
+            {"units": [dict(base, title=f"知识点 {index}") for index in range(3)]},
+        ]
+        calls = []
+        original_post = MODULE.post_json
+        try:
+            def fake_post(payload, _key):
+                calls.append(payload)
+                return {"choices": [{"message": {"content": json.dumps(responses.pop(0), ensure_ascii=False)}}]}
+            MODULE.post_json = fake_post
+            plan = MODULE.maintenance_plan(root, source, source.read_text(encoding="utf-8"), "key", "model")
+        finally:
+            MODULE.post_json = original_post
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(plan["units"]), 3)
+
+    def test_json_parser_accepts_deepseek_code_fence(self):
+        parsed = MODULE.parse_json_object('```json\n{"units": []}\n```', "bad json")
+        self.assertEqual(parsed, {"units": []})
