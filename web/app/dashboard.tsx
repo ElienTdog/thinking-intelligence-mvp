@@ -43,9 +43,8 @@ function clipPreview(clip: Clip) {
 
 export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [data, setData] = useState<BootstrapPayload | null>(null);
-  const [surface, setSurface] = useState<Surface>("raw");
+  const [surface, setSurface] = useState<Surface>("feed");
   const [feedCards, setFeedCards] = useState<KnowledgeCard[]>([]);
-  const [feedOrder, setFeedOrder] = useState<"current" | "smart">("current");
   const [nextFeedCursor, setNextFeedCursor] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [showCapture, setShowCapture] = useState(false);
@@ -73,7 +72,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
       setData(next);
       void fetch("/api/local-sync/status").then((response) => response.ok ? response.json() : null).then((status) => { if (status) setSyncStatus(status as SyncStatus); }).catch(() => undefined);
       try {
-        const feed = await requestJson(`/api/feed?limit=8${feedOrder === "smart" ? "&preview=bandit" : ""}`) as FeedPayload;
+        const feed = await requestJson("/api/feed?limit=8") as FeedPayload;
         setFeedCards(feed.cards);
         setNextFeedCursor(feed.nextCursor);
       } catch {
@@ -83,7 +82,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "暂时无法读取知识流");
     }
-  }, [feedOrder]);
+  }, []);
 
   const saveClip = useCallback(async (content: string) => {
     const value = content.trim();
@@ -104,6 +103,12 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     if (surface !== "raw") return;
@@ -127,14 +132,14 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   const loadMoreFeed = useCallback(() => {
     if (!nextFeedCursor) return;
-    void requestJson(`/api/feed?limit=8&cursor=${encodeURIComponent(nextFeedCursor)}${feedOrder === "smart" ? "&preview=bandit" : ""}`)
+    void requestJson(`/api/feed?limit=8&cursor=${encodeURIComponent(nextFeedCursor)}`)
       .then((payload) => {
         const next = payload as FeedPayload;
         setFeedCards((current) => [...current, ...next.cards.filter((card) => !current.some((item) => item.id === card.id))]);
         setNextFeedCursor(next.nextCursor);
       })
       .catch((error) => setNotice(error instanceof Error ? error.message : "无法加载更多知识卡"));
-  }, [feedOrder, nextFeedCursor]);
+  }, [nextFeedCursor]);
 
   const generateToday = useCallback(() => {
     setIsGenerating(true);
@@ -355,11 +360,6 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
           onLinkQuestion={setLinkingCard}
           onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
           onOpenSources={() => setSurface("raw")}
-          feedOrder={feedOrder}
-          onFeedOrderChange={(order) => {
-            setFeedOrder(order);
-            setNotice(order === "smart" ? "已切换到智能混排体验。" : "已回到当前排序。");
-          }}
           onRemoveSource={(rawSourceId) => {
             const clip = data.clips.find((item) => item.id === rawSourceId);
             if (clip) void removeSource(clip);
@@ -383,8 +383,6 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
           onLinkQuestion={setLinkingCard}
           onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
           onOpenSources={() => setSurface("raw")}
-          feedOrder={feedOrder}
-          onFeedOrderChange={setFeedOrder}
           onRemoveSource={(rawSourceId) => {
             const clip = data.clips.find((item) => item.id === rawSourceId);
             if (clip) void removeSource(clip);

@@ -379,17 +379,18 @@ test("records actual and shadow orders under one session without training on sha
   assert.equal(rows.some((row) => row.policy === "bandit-shadow" && row.wasShown), false);
 });
 
-test("offers an authenticated smart-mix preview without changing the default mode", async () => {
+test("uses smart mix by default without exposing an ordering switch", async () => {
   const [route, dashboard, feed] = await Promise.all([
     readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(route, /preview === "bandit"/);
-  assert.match(route, /RECOMMENDER_MODE[^]*\|\| "SHADOW"/);
-  assert.match(dashboard, /preview=bandit/);
-  assert.match(feed, /当前排序/);
-  assert.match(feed, /智能混排/);
+  assert.match(route, /RECOMMENDER_MODE[^]*\|\| "BANDIT"/);
+  assert.doesNotMatch(dashboard, /feedOrder|preview=bandit/);
+  assert.match(dashboard, /useState<Surface>\("feed"\)/);
+  assert.doesNotMatch(feed, /当前排序|智能混排|feed-order-switch/);
+  assert.match(dashboard, /setTimeout\(\(\) => setNotice\(""\), 2000\)/);
 });
 
 test("mirrors DeepSeek units without a long-running model call in the site request", async () => {

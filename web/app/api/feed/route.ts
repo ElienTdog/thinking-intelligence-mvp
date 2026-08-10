@@ -12,8 +12,8 @@ const SHADOW_SIZE = 20;
 
 function recommenderMode(preview: string | null) {
   if (preview === "bandit") return "BANDIT";
-  const value = String((env as unknown as { RECOMMENDER_MODE?: string }).RECOMMENDER_MODE || "SHADOW").toUpperCase();
-  return value === "LEGACY" || value === "BANDIT" ? value : "SHADOW";
+  const value = String((env as unknown as { RECOMMENDER_MODE?: string }).RECOMMENDER_MODE || "BANDIT").toUpperCase();
+  return value === "LEGACY" || value === "BANDIT" ? value : "BANDIT";
 }
 
 export async function GET(request: Request) {

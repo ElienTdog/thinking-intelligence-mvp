@@ -23,8 +23,6 @@ type KnowledgeFeedProps = {
   onRemoveSource: (rawSourceId: string) => void;
   onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
   onOpenSources: () => void;
-  feedOrder: "current" | "smart";
-  onFeedOrderChange: (order: "current" | "smart") => void;
 };
 
 export function KnowledgeFeed({
@@ -44,8 +42,6 @@ export function KnowledgeFeed({
   onRemoveSource,
   onStartPractice,
   onOpenSources,
-  feedOrder,
-  onFeedOrderChange,
 }: KnowledgeFeedProps) {
   const visibleCards = mode === "story" ? storyCards : cards;
   const followedCards = visibleCards.filter(isFollowedCreator);
@@ -68,10 +64,6 @@ export function KnowledgeFeed({
   }
 
   return <section className="knowledge-deck" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
-    {mode === "feed" && <div className="feed-order-switch" role="group" aria-label="推荐排序体验">
-      <button className={feedOrder === "current" ? "is-active" : ""} onClick={() => onFeedOrderChange("current")}>当前排序</button>
-      <button className={feedOrder === "smart" ? "is-active" : ""} onClick={() => onFeedOrderChange("smart")}>智能混排</button>
-    </div>}
     <div className="knowledge-scroll">
       {mode === "feed" && wiki.review && <ReviewMomentView review={wiki.review} onPractice={onStartPractice} />}
       {mode === "feed" && !followedCards.length && <FollowedCreatorEmpty onOpenSources={onOpenSources} />}
