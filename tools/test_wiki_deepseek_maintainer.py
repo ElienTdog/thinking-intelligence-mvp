@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -132,3 +134,6 @@ class WikiDeepSeekMaintainerTests(unittest.TestCase):
         content = digest.read_text(encoding="utf-8")
         self.assertIn("## 可独立阅读的知识单元", content)
         self.assertEqual(content.count("原文证据：原文第二段"), 3)
+        marker = re.search(r"<!-- deepseek-knowledge-units\s*\n(.*?)\n-->", content, re.DOTALL)
+        self.assertIsNotNone(marker)
+        self.assertEqual(len(json.loads(marker.group(1))), 3)

@@ -307,6 +307,7 @@ def write_source_digest(root: Path, source_path: Path, plan: dict[str, Any]) -> 
             f"- 边界：{clean_text(unit.get('boundary'), 500)}"
         )
     unit_block = "\n\n".join(unit_sections) or "本次旧格式维护记录未包含独立知识单元。"
+    unit_payload = json.dumps(units, ensure_ascii=False, separators=(",", ":"))
     target = root / "wiki/03 主题与主张/来源解读" / f"{datetime.now().date().isoformat()} - 来源解读：{safe_filename(title)}.md"
     target.parent.mkdir(parents=True, exist_ok=True)
     markdown = f"""# 来源解读：{title}
@@ -330,6 +331,10 @@ def write_source_digest(root: Path, source_path: Path, plan: dict[str, Any]) -> 
 ## 可独立阅读的知识单元
 
 {unit_block}
+
+<!-- deepseek-knowledge-units
+{unit_payload}
+-->
 
 ## 与现有 Wiki 的关系
 

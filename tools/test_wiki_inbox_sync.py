@@ -79,7 +79,8 @@ class WikiInboxSyncTests(unittest.TestCase):
         raw.write_text('---\ntitle: "卡兹克文章"\nsource: "https://example.com"\nauthor:\n  - "[[数字生命卡兹克]]"\n---\n\n正文', encoding="utf-8")
         digest = root / "wiki/03 主题与主张/来源解读/卡兹克解读.md"
         digest.parent.mkdir(parents=True)
-        digest.write_text("# 来源解读：卡兹克文章\n\n关联问题：[[02 问题/Q1 - 如何才叫 AI 用得深]]\n\n## 这篇文章说了什么\n\n总结。\n\n## 关键点\n\n- 要点。\n\n## 与现有 Wiki 的关系\n\n支持。\n\n## 带入真实任务的问题\n\n怎么验证？\n", encoding="utf-8")
+        units = [{"title": f"知识点 {index}", "hook": "入口", "explanation": "解释", "topic": "AI 验证", "subtopics": [], "format": "方法", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "对照", "boundary": "边界", "whyItMatters": "重要", "sourceEvidence": "原文段落"} for index in range(3)]
+        digest.write_text("# 来源解读：卡兹克文章\n\n关联问题：[[02 问题/Q1 - 如何才叫 AI 用得深]]\n\n## 这篇文章说了什么\n\n总结。\n\n## 关键点\n\n- 要点。\n\n<!-- deepseek-knowledge-units\n" + MODULE.json.dumps(units, ensure_ascii=False) + "\n-->\n\n## 与现有 Wiki 的关系\n\n支持。\n\n## 带入真实任务的问题\n\n怎么验证？\n", encoding="utf-8")
         state = {"sources": {"wiki/01 原始材料/网页剪藏/卡兹克.md": {"pages": ["wiki/03 主题与主张/来源解读/卡兹克解读.md"]}}}
         state_path = root / "wiki/00 系统/deepseek-maintenance-state.json"
         state_path.parent.mkdir(parents=True)
@@ -87,6 +88,7 @@ class WikiInboxSyncTests(unittest.TestCase):
         items = MODULE.maintained_knowledge_items(root)
         self.assertEqual(items[0]["sourceName"], "数字生命卡兹克")
         self.assertEqual(items[0]["digest"]["keyPoints"], ["要点。"]) 
+        self.assertEqual(len(items[0]["units"]), 3)
 
     def test_wechat_hotlink_is_not_used_as_an_online_cover(self):
         hotlink = "![图片](https://mmbiz.qpic.cn/mmbiz_png/example/640?wx_fmt=png)"

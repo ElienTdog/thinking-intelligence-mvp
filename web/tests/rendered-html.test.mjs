@@ -391,3 +391,10 @@ test("offers an authenticated smart-mix preview without changing the default mod
   assert.match(feed, /当前排序/);
   assert.match(feed, /智能混排/);
 });
+
+test("mirrors DeepSeek units without a long-running model call in the site request", async () => {
+  const route = await readFile(new URL("../app/api/local-sync/knowledge/route.ts", import.meta.url), "utf8");
+  assert.match(route, /parseKnowledgeUnits/);
+  assert.match(route, /item\.units/);
+  assert.doesNotMatch(route, /compileKnowledgeUnits|DEEPSEEK_API_KEY/);
+});

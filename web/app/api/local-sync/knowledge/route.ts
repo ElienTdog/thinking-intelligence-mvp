@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { compileKnowledgeUnits, topicFeatures } from "../../../lib/knowledge-units";
+import { parseKnowledgeUnits, topicFeatures, type KnowledgeUnit } from "../../../lib/knowledge-units";
 import { requireSyncOwner } from "../auth";
 
 type LocalPage = {
@@ -20,6 +20,7 @@ type KnowledgeItem = {
   publishedAt?: unknown;
   digest?: LocalPage & { keyPoints?: unknown; relation?: unknown; relatedQuestions?: unknown };
   methods?: LocalPage[];
+  units?: KnowledgeUnit[];
 };
 
 const text = (value: unknown, limit: number) => typeof value === "string" ? value.trim().slice(0, limit) : "";
@@ -54,9 +55,6 @@ export async function POST(request: Request) {
   const payload = await request.json().catch(() => null) as { items?: KnowledgeItem[] } | null;
   const items = Array.isArray(payload?.items) ? payload.items.slice(0, 12) : [];
   if (!items.length) return Response.json({ error: "items are required" }, { status: 400 });
-  const apiKey = String((env as unknown as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY || "");
-  if (!apiKey) return Response.json({ error: "DEEPSEEK_API_KEY is not configured" }, { status: 503 });
-
   const mirrored: Array<{ sourceLocalPath: string; cardId: string }> = [];
   for (const item of items) {
     const sourceLocalPath = text(item.sourceLocalPath, 1_000);
@@ -66,6 +64,12 @@ export async function POST(request: Request) {
     const sourceName = text(item.sourceName, 280) || "本地 Wiki";
     const sourceCoverUrl = text(item.sourceCoverUrl, 700_000);
     const digest = item.digest;
+    let units: KnowledgeUnit[] = [];
+    try {
+      units = parseKnowledgeUnits(JSON.stringify({ units: item.units }));
+    } catch {
+      continue;
+    }
     if (!sourceLocalPath || sourceContent.length < 900 || !sourceTitle || !digest) continue;
     const existingClip = await env.DB.prepare("SELECT id, processing_status AS processingStatus, mirror_version AS mirrorVersion FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string; processingStatus: string; mirrorVersion: string }>();
     if (existingClip && !["captured", "maintaining", "mirrored"].includes(existingClip.processingStatus)) continue;
@@ -89,7 +93,6 @@ export async function POST(request: Request) {
       mirrored.push({ sourceLocalPath, cardId: cards.results![0].id });
       continue;
     }
-    const units = await compileKnowledgeUnits({ title: sourceTitle, url: sourceUrl, text: sourceContent }, { apiKey });
     const existingCards = cards.results ?? [];
     const activeKeys: string[] = [];
     for (const [index, unit] of units.entries()) {

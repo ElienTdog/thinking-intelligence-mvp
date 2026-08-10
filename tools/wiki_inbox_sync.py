@@ -541,6 +541,17 @@ def source_author(content: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def deepseek_knowledge_units(content: str) -> list[dict[str, Any]]:
+    match = re.search(r"<!-- deepseek-knowledge-units\s*\n(.*?)\n-->", content, re.DOTALL)
+    if not match:
+        return []
+    try:
+        units = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+    return [unit for unit in units[:6] if isinstance(unit, dict)] if isinstance(units, list) else []
+
+
 def maintained_knowledge_items(root: Path) -> list[dict[str, Any]]:
     state_path = root / "wiki" / "00 系统" / "deepseek-maintenance-state.json"
     if not state_path.exists():
@@ -569,6 +580,7 @@ def maintained_knowledge_items(root: Path) -> list[dict[str, Any]]:
             "sourceName": source_author(source_content) or "本地 Wiki",
             "publishedAt": frontmatter_value(source_content, "published") or markdown_value(source_content, "发布时间"),
             "sourceCoverUrl": first_markdown_image(source_content, root),
+            "units": deepseek_knowledge_units(digest_content),
             "digest": {
                 "localPath": markdown_relative(root, digest_path),
                 "title": markdown_title(digest_content) or digest_path.stem,
