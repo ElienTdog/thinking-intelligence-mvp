@@ -1,6 +1,6 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { clips, dailyStories, feedEvents, knowledgeCards, learningAttempts, wikiActivity, wikiLinks, wikiPageSources, wikiPages } from "../../../../db/schema";
+import { clips, dailyStories, feedEvents, feedImpressions, knowledgeCards, learningAttempts, wikiActivity, wikiLinks, wikiPageSources, wikiPages } from "../../../../db/schema";
 import { requireApiUser } from "../../auth";
 
 export async function PATCH(_request: Request, context: { params: Promise<{ clipId: string }> }) {
@@ -29,6 +29,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ cli
   const cardIds = cardRows.map((card) => card.id);
   const pageIds = cardRows.map((card) => card.wikiPageId).filter((id): id is string => Boolean(id));
   if (cardIds.length) {
+    await db.delete(feedImpressions).where(and(eq(feedImpressions.ownerId, auth.user.userId), inArray(feedImpressions.cardId, cardIds)));
     await db.delete(feedEvents).where(and(eq(feedEvents.ownerId, auth.user.userId), inArray(feedEvents.cardId, cardIds)));
     await db.delete(knowledgeCards).where(and(eq(knowledgeCards.rawSourceId, clip.id), eq(knowledgeCards.ownerId, auth.user.userId)));
   }

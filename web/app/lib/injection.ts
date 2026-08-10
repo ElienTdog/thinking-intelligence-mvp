@@ -1,6 +1,7 @@
 import { chinaDate, ensureKnowledgeWorkspace } from "./knowledge-workspace";
 import { isCompilableRawSource } from "./validation.mjs";
 import { ensureWikiForCards } from "./wiki";
+import { compileKnowledgeUnits, parseKnowledgeUnits, topicFeatures, type KnowledgeUnit } from "./knowledge-units";
 
 type FeedRow = {
   id: string;
@@ -36,15 +37,7 @@ type Candidate = {
   followed: boolean;
 };
 
-type CompiledCard = {
-  title: string;
-  hook: string;
-  explanation: string;
-  reasoningMove: string;
-  boundary: string;
-  whyItMatters: string;
-  tags: string[];
-};
+type CompiledCard = KnowledgeUnit;
 
 export type InjectionConfig = {
   apiKey?: string;
@@ -151,31 +144,36 @@ export async function compileQueuedSources(
           .bind(source.source_type === "video" ? "缺少可核验字幕或文字稿" : "来源没有足够可编译文本", source.id).run();
         continue;
       }
-      const compiled = await compileRawSource(source, config);
-      const cardId = crypto.randomUUID();
-      await db.prepare(`
-        INSERT INTO knowledge_cards
-          (id, owner_id, raw_source_id, title, hook, explanation, reasoning_move, boundary,
-           why_it_matters, tags, source_name, source_url, verification_status, state)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')
-      `).bind(
-        cardId,
-        ownerId,
-        source.id,
-        compiled.title,
-        compiled.hook,
-        compiled.explanation,
-        compiled.reasoningMove,
-        compiled.boundary,
-        compiled.whyItMatters,
-        JSON.stringify(compiled.tags),
-        source.publisher || source.source_title || "主动收录",
-        source.source_url,
-        source.verification_status,
-      ).run();
+      const compiledUnits = await compileRawSource(source, config);
+      const creator = source.publisher || source.source_title || "主动收录";
+      for (const [index, compiled] of compiledUnits.entries()) {
+        const cardId = crypto.randomUUID();
+        await db.prepare(`
+          INSERT INTO knowledge_cards
+            (id, owner_id, raw_source_id, title, hook, explanation, reasoning_move, boundary,
+             why_it_matters, tags, topic_features, unit_key, source_name, source_url, verification_status, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')
+        `).bind(
+          cardId,
+          ownerId,
+          source.id,
+          compiled.title,
+          compiled.hook,
+          compiled.explanation,
+          compiled.reasoningMove,
+          compiled.boundary,
+          compiled.whyItMatters,
+          JSON.stringify([...new Set([...compiled.tags, compiled.topic])]),
+          topicFeatures(compiled, creator),
+          `unit-${index + 1}`,
+          creator,
+          source.source_url,
+          source.verification_status,
+        ).run();
+        cards.push({ ...compiled, id: cardId, rawSourceId: source.id });
+      }
       await db.prepare("UPDATE clips SET processing_status = 'compiled', processed_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(source.id).run();
-      cards.push({ ...compiled, id: cardId, rawSourceId: source.id });
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : "AI 编译失败";
       await db.prepare("UPDATE clips SET processing_status = 'failed', processing_error = ? WHERE id = ?")
@@ -325,8 +323,7 @@ async function createDailyStory(
 
 async function compileRawSource(source: RawRow, config: InjectionConfig) {
   const sourceText = source.raw_excerpt || source.content;
-  const response = await callDeepSeek(config, `你是知识卡编译器。只根据给定来源生成一张中文知识卡，不得补充来源没有表达的事实。输出 json，字段为 title、hook、explanation、reasoningMove、boundary、whyItMatters、tags。tags 是 1-3 个短中文主题。title 必须是可被跨来源复用和检索的主张，而不是吸引点击的标题。\n\n来源标题：${source.source_title}\n来源：${source.source_url}\n文本：${sourceText}`);
-  return parseCompiledCard(response);
+  return compileKnowledgeUnits({ title: source.source_title, url: source.source_url, text: sourceText }, config);
 }
 
 async function compileStory(cards: Array<CompiledCard & { id: string }>, config: InjectionConfig, wikiContext: string) {
@@ -384,20 +381,7 @@ async function callDeepSeek(config: InjectionConfig, prompt: string) {
 }
 
 export function parseCompiledCard(value: string): CompiledCard {
-  const parsed = JSON.parse(value);
-  const required = ["title", "hook", "explanation", "reasoningMove", "boundary", "whyItMatters"];
-  if (required.some((key) => !String(parsed?.[key] ?? "").trim())) throw new Error("card json is incomplete");
-  const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((tag: unknown) => typeof tag === "string").slice(0, 3) : [];
-  if (!tags.length) throw new Error("card json has no tags");
-  return {
-    title: String(parsed.title).trim().slice(0, 160),
-    hook: String(parsed.hook).trim().slice(0, 240),
-    explanation: String(parsed.explanation).trim().slice(0, 2_000),
-    reasoningMove: String(parsed.reasoningMove).trim().slice(0, 800),
-    boundary: String(parsed.boundary).trim().slice(0, 800),
-    whyItMatters: String(parsed.whyItMatters).trim().slice(0, 800),
-    tags,
-  };
+  return parseKnowledgeUnits(value)[0];
 }
 
 export function parseAiHotCandidates(body: string, expectedPublisher = ""): Candidate[] {

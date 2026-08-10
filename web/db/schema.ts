@@ -127,6 +127,8 @@ export const knowledgeCards = sqliteTable(
     whyItMatters: text("why_it_matters").notNull(),
     coverUrl: text("cover_url").notNull().default(""),
     tags: text("tags").notNull().default("[]"),
+    topicFeatures: text("topic_features").notNull().default("{}"),
+    unitKey: text("unit_key").notNull().default("source"),
     sourceName: text("source_name").notNull(),
     sourceUrl: text("source_url").notNull(),
     verificationStatus: text("verification_status").notNull().default("verified"),
@@ -137,6 +139,7 @@ export const knowledgeCards = sqliteTable(
     index("idx_cards_owner_created").on(table.ownerId, table.createdAt),
     index("idx_cards_owner_story").on(table.ownerId, table.storyId, table.storyPosition),
     index("idx_cards_owner_raw").on(table.ownerId, table.rawSourceId),
+    index("idx_cards_owner_raw_unit").on(table.ownerId, table.rawSourceId, table.unitKey),
   ],
 );
 
@@ -236,6 +239,37 @@ export const feedEvents = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [index("idx_feed_events_owner_card").on(table.ownerId, table.cardId, table.createdAt)],
+);
+
+export const recommendationModels = sqliteTable(
+  "recommendation_models",
+  {
+    ownerId: text("owner_id").primaryKey(),
+    policyVersion: text("policy_version").notNull(),
+    modelJson: text("model_json").notNull(),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_recommendation_models_updated").on(table.updatedAt)],
+);
+
+export const feedImpressions = sqliteTable(
+  "feed_impressions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    cardId: text("card_id").notNull().references(() => knowledgeCards.id),
+    topic: text("topic").notNull(),
+    position: integer("position").notNull(),
+    policy: text("policy").notNull(),
+    selectionProbability: text("selection_probability").notNull(),
+    wasShown: integer("was_shown", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_feed_impressions_owner_session").on(table.ownerId, table.sessionId, table.policy),
+    index("idx_feed_impressions_owner_card").on(table.ownerId, table.cardId, table.wasShown, table.createdAt),
+  ],
 );
 
 export const injectionRuns = sqliteTable(

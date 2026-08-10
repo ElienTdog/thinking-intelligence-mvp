@@ -23,6 +23,8 @@ type KnowledgeFeedProps = {
   onRemoveSource: (rawSourceId: string) => void;
   onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
   onOpenSources: () => void;
+  feedOrder: "current" | "smart";
+  onFeedOrderChange: (order: "current" | "smart") => void;
 };
 
 export function KnowledgeFeed({
@@ -42,6 +44,8 @@ export function KnowledgeFeed({
   onRemoveSource,
   onStartPractice,
   onOpenSources,
+  feedOrder,
+  onFeedOrderChange,
 }: KnowledgeFeedProps) {
   const visibleCards = mode === "story" ? storyCards : cards;
   const followedCards = visibleCards.filter(isFollowedCreator);
@@ -64,6 +68,10 @@ export function KnowledgeFeed({
   }
 
   return <section className="knowledge-deck" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
+    {mode === "feed" && <div className="feed-order-switch" role="group" aria-label="推荐排序体验">
+      <button className={feedOrder === "current" ? "is-active" : ""} onClick={() => onFeedOrderChange("current")}>当前排序</button>
+      <button className={feedOrder === "smart" ? "is-active" : ""} onClick={() => onFeedOrderChange("smart")}>智能混排</button>
+    </div>}
     <div className="knowledge-scroll">
       {mode === "feed" && wiki.review && <ReviewMomentView review={wiki.review} onPractice={onStartPractice} />}
       {mode === "feed" && !followedCards.length && <FollowedCreatorEmpty onOpenSources={onOpenSources} />}
@@ -188,6 +196,7 @@ function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, 
     <section><p>推理动作</p><span>{card.reasoningMove}</span></section>
     <section><p>适用边界</p><span>{card.boundary}</span></section>
     <section><p>为什么重要</p><span>{card.whyItMatters}</span></section>
+    {card.recommendationReason && <section><p>为什么推荐</p><span>{card.recommendationReason}</span></section>}
     {connections.length > 0 && <section className="wiki-connections"><p>在 Wiki 里</p><strong>{connections.map((connection) => connection.title).join(" · ")}</strong><span>这些连接只表示主题或阅读关联；是否支持、冲突或适用，仍需回到各自原文判断。</span></section>}
     <div className="detail-actions">
       {card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onEvent(card.id, "opened_source")}>打开原文</a>}

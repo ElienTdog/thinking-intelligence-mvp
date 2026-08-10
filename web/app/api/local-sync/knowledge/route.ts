@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { compileKnowledgeUnits, topicFeatures } from "../../../lib/knowledge-units";
 import { requireSyncOwner } from "../auth";
 
 type LocalPage = {
@@ -22,10 +23,6 @@ type KnowledgeItem = {
 };
 
 const text = (value: unknown, limit: number) => typeof value === "string" ? value.trim().slice(0, limit) : "";
-const list = (value: unknown, limit: number, itemLimit: number) => Array.isArray(value)
-  ? value.filter((item): item is string => typeof item === "string").map((item) => text(item, itemLimit)).filter(Boolean).slice(0, limit)
-  : [];
-
 async function upsertPage(ownerId: string, rawSourceId: string, page: LocalPage, kind: "synthesis" | "topic") {
   const localPath = text(page.localPath, 1_000);
   const title = text(page.title, 280);
@@ -57,6 +54,8 @@ export async function POST(request: Request) {
   const payload = await request.json().catch(() => null) as { items?: KnowledgeItem[] } | null;
   const items = Array.isArray(payload?.items) ? payload.items.slice(0, 12) : [];
   if (!items.length) return Response.json({ error: "items are required" }, { status: 400 });
+  const apiKey = String((env as unknown as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY || "");
+  if (!apiKey) return Response.json({ error: "DEEPSEEK_API_KEY is not configured" }, { status: 503 });
 
   const mirrored: Array<{ sourceLocalPath: string; cardId: string }> = [];
   for (const item of items) {
@@ -68,12 +67,12 @@ export async function POST(request: Request) {
     const sourceCoverUrl = text(item.sourceCoverUrl, 700_000);
     const digest = item.digest;
     if (!sourceLocalPath || sourceContent.length < 900 || !sourceTitle || !digest) continue;
-    const existingClip = await env.DB.prepare("SELECT id, processing_status AS processingStatus FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string; processingStatus: string }>();
+    const existingClip = await env.DB.prepare("SELECT id, processing_status AS processingStatus, mirror_version AS mirrorVersion FROM clips WHERE owner_id = ? AND local_path = ? LIMIT 1").bind(ownerId, sourceLocalPath).first<{ id: string; processingStatus: string; mirrorVersion: string }>();
     if (existingClip && !["captured", "maintaining", "mirrored"].includes(existingClip.processingStatus)) continue;
     const rawSourceId = existingClip?.id ?? crypto.randomUUID();
     if (existingClip) {
-      await env.DB.prepare("UPDATE clips SET content = ?, source_url = ?, source_title = ?, publisher = ?, published_at = ?, verification_status = 'verified', processing_status = 'mirrored', raw_excerpt = ?, content_hash = ?, mirror_updated_at = CURRENT_TIMESTAMP, processed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?")
-        .bind(sourceContent, sourceUrl, sourceTitle, sourceName, text(item.publishedAt, 80), sourceContent.slice(0, 7_000), `local:${sourceLocalPath}:${sourceContent.length}`, rawSourceId, ownerId).run();
+      await env.DB.prepare("UPDATE clips SET content = ?, source_url = ?, source_title = ?, publisher = ?, published_at = ?, verification_status = 'verified', processing_status = 'mirrored', raw_excerpt = ?, content_hash = ?, mirror_version = ?, mirror_updated_at = CURRENT_TIMESTAMP, processed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?")
+        .bind(sourceContent, sourceUrl, sourceTitle, sourceName, text(item.publishedAt, 80), sourceContent.slice(0, 7_000), `local:${sourceLocalPath}:${sourceContent.length}`, String(sourceContent.length), rawSourceId, ownerId).run();
     } else {
       await env.DB.prepare("INSERT INTO clips (id, owner_id, content, source_url, source_title, status, origin, source_type, publisher, published_at, verification_status, processing_status, raw_excerpt, content_hash, priority, processed_at, local_path, mirror_version, mirror_updated_at) VALUES (?, ?, ?, ?, ?, 'mirrored', 'local_wiki', 'article', ?, ?, 'verified', 'mirrored', ?, ?, 100, CURRENT_TIMESTAMP, ?, ?, CURRENT_TIMESTAMP)")
         .bind(rawSourceId, ownerId, sourceContent, sourceUrl, sourceTitle, sourceName, text(item.publishedAt, 80), sourceContent.slice(0, 7_000), `local:${sourceLocalPath}:${sourceContent.length}`, sourceLocalPath, String(sourceContent.length)).run();
@@ -82,32 +81,40 @@ export async function POST(request: Request) {
     const digestPageId = await upsertPage(ownerId, rawSourceId, digest, "synthesis");
     for (const method of (Array.isArray(item.methods) ? item.methods.slice(0, 4) : [])) await upsertPage(ownerId, rawSourceId, method, "topic");
     if (!digestPageId) continue;
-    const keyPoints = list(digest.keyPoints, 4, 300);
-    const tags = ["local-wiki", `creator:${sourceName}`, ...list(digest.relatedQuestions, 2, 80)];
-    const card = await env.DB.prepare("SELECT id FROM knowledge_cards WHERE owner_id = ? AND raw_source_id = ? AND wiki_page_id = ? LIMIT 1")
-      .bind(ownerId, rawSourceId, digestPageId).first<{ id: string }>();
-    const cardId = card?.id ?? crypto.randomUUID();
-    const values = [
-      digestPageId,
-      sourceTitle,
-      text(digest.summary, 1_800),
-      keyPoints.join("\n"),
-      text(digest.relation, 800) || "这是一条由本地 Wiki 提炼的来源解读，请回到原文核验。",
-      "来自你关注的作者与本地知识库；可用迁移问题检验是否值得留下。",
-      text(digest.transferPrompt, 1_000) || "把这条理解带进下一个真实任务，检验它是否会改变你的取舍。",
-      sourceCoverUrl,
-      JSON.stringify(tags),
-      sourceName,
-      sourceUrl,
-    ];
-    if (card) {
-      await env.DB.prepare("UPDATE knowledge_cards SET wiki_page_id = ?, title = ?, hook = ?, explanation = ?, reasoning_move = ?, boundary = ?, why_it_matters = ?, cover_url = ?, tags = ?, source_name = ?, source_url = ?, verification_status = 'verified', state = 'published' WHERE id = ? AND owner_id = ?")
-        .bind(...values, cardId, ownerId).run();
-    } else {
-      await env.DB.prepare("INSERT INTO knowledge_cards (id, owner_id, raw_source_id, wiki_page_id, title, hook, explanation, reasoning_move, boundary, why_it_matters, cover_url, tags, source_name, source_url, verification_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', 'published')")
-        .bind(cardId, ownerId, rawSourceId, ...values).run();
+    const transferPrompt = text(digest.transferPrompt, 1_000);
+    const cards = await env.DB.prepare("SELECT id, unit_key AS unitKey FROM knowledge_cards WHERE owner_id = ? AND raw_source_id = ? ORDER BY unit_key")
+      .bind(ownerId, rawSourceId).all<{ id: string; unitKey: string }>();
+    const unchanged = existingClip?.mirrorVersion === String(sourceContent.length) && (cards.results?.filter((card) => card.unitKey.startsWith("unit-")).length ?? 0) >= 3;
+    if (unchanged) {
+      mirrored.push({ sourceLocalPath, cardId: cards.results![0].id });
+      continue;
     }
-    mirrored.push({ sourceLocalPath, cardId });
+    const units = await compileKnowledgeUnits({ title: sourceTitle, url: sourceUrl, text: sourceContent }, { apiKey });
+    const existingCards = cards.results ?? [];
+    const activeKeys: string[] = [];
+    for (const [index, unit] of units.entries()) {
+      const unitKey = `unit-${index + 1}`;
+      activeKeys.push(unitKey);
+      const existing = existingCards.find((card) => card.unitKey === unitKey)
+        ?? (index === 0 ? existingCards.find((card) => card.unitKey === "source") : undefined);
+      const cardId = existing?.id ?? crypto.randomUUID();
+      const tags = ["local-wiki", `creator:${sourceName}`, unit.topic, ...unit.subtopics].slice(0, 7);
+      const values = [
+        digestPageId, unit.title, unit.hook, unit.explanation, unit.reasoningMove, unit.boundary,
+        unit.whyItMatters || transferPrompt, sourceCoverUrl, JSON.stringify(tags), topicFeatures(unit, sourceName),
+        unitKey, sourceName, sourceUrl,
+      ];
+      if (existing) {
+        await env.DB.prepare("UPDATE knowledge_cards SET wiki_page_id = ?, title = ?, hook = ?, explanation = ?, reasoning_move = ?, boundary = ?, why_it_matters = ?, cover_url = ?, tags = ?, topic_features = ?, unit_key = ?, source_name = ?, source_url = ?, verification_status = 'verified', state = 'published' WHERE id = ? AND owner_id = ?")
+          .bind(...values, cardId, ownerId).run();
+      } else {
+        await env.DB.prepare("INSERT INTO knowledge_cards (id, owner_id, raw_source_id, wiki_page_id, title, hook, explanation, reasoning_move, boundary, why_it_matters, cover_url, tags, topic_features, unit_key, source_name, source_url, verification_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', 'published')")
+          .bind(cardId, ownerId, rawSourceId, ...values).run();
+      }
+      if (index === 0) mirrored.push({ sourceLocalPath, cardId });
+    }
+    const staleIds = existingCards.filter((card) => !activeKeys.includes(card.unitKey) && card.unitKey !== "source").map((card) => card.id);
+    for (const staleId of staleIds) await env.DB.prepare("UPDATE knowledge_cards SET state = 'archived' WHERE id = ? AND owner_id = ?").bind(staleId, ownerId).run();
   }
   return Response.json({ mirrored });
 }

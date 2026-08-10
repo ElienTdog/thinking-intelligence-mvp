@@ -168,6 +168,20 @@ def maintenance_plan(root: Path, source_path: Path, source_content: str, api_key
   "relation":"以 support、challenge、narrow 或 unchanged 开头，并用一句话说明它和现有 Wiki 的具体关系",
   "relatedQuestionIds":["Q1 或 Q2，最多两个"],
   "understandingQuestion":"一条能帮助用户把文章带入真实任务的小问题",
+  "units":[{{
+    "title":"可跨来源复用的知识点标题",
+    "hook":"一句人话入口",
+    "explanation":"只基于原文的解释",
+    "topic":"可动态创造的主主题",
+    "subtopics":["最多5个子主题"],
+    "format":"观点|案例|反例|方法|解释",
+    "difficulty":"入门|中等|进阶",
+    "novelty":0.0,
+    "reasoningMove":"原文使用的思考动作",
+    "boundary":"适用边界",
+    "whyItMatters":"为什么值得看",
+    "sourceEvidence":"原文中的短证据或忠实定位"
+  }}],
   "updates":[{{
     "kind":"question|topic|concept|person",
     "targetPath":"既有页面的完整 path；新建页面留空",
@@ -202,7 +216,29 @@ existingPages：
         raise RuntimeError("DeepSeek 没有返回可解析的维护计划") from error
     if not isinstance(result, dict):
         raise RuntimeError("DeepSeek 返回的维护计划格式错误")
+    if "units" in result:
+        validate_knowledge_units(result)
     return result
+
+
+def validate_knowledge_units(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    required = {
+        "title", "hook", "explanation", "topic", "format", "difficulty",
+        "reasoningMove", "boundary", "whyItMatters", "sourceEvidence",
+    }
+    units: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in plan.get("units", [])[:6]:
+        if not isinstance(raw, dict) or any(not clean_text(raw.get(key)) for key in required):
+            continue
+        identity = (clean_text(raw.get("title"), 160).lower(), clean_text(raw.get("topic"), 80).lower())
+        if identity in seen:
+            continue
+        seen.add(identity)
+        units.append(raw)
+    if len(units) < 3:
+        raise RuntimeError("DeepSeek 必须返回 3–6 个不同且可追溯的知识单元")
+    return units
 
 
 def target_for_update(root: Path, update: dict[str, Any], existing: set[str]) -> Path | None:
@@ -252,6 +288,25 @@ def write_source_digest(root: Path, source_path: Path, plan: dict[str, Any]) -> 
     questions = ", ".join(f"[[02 问题/{QUESTION_PATHS[item].stem}]]" for item in question_ids) or "待归类"
     question = clean_text(plan.get("understandingQuestion"), 280) or "这篇文章会改变我下一次任务中的哪一个具体取舍？"
     points = "\n".join(f"- {point}" for point in key_points) or "- 待在原文阅读中补充。"
+    units = []
+    try:
+        if "units" in plan:
+            units = validate_knowledge_units(plan)
+    except RuntimeError:
+        pass
+    unit_sections = []
+    for index, unit in enumerate(units, 1):
+        subtopics = "、".join(clean_text(item, 60) for item in unit.get("subtopics", [])[:5] if clean_text(item, 60)) or "无"
+        unit_sections.append(
+            f"### {index}. {clean_text(unit.get('title'), 160)}\n\n"
+            f"- 主题：{clean_text(unit.get('topic'), 80)}\n"
+            f"- 子主题：{subtopics}\n"
+            f"- 形式：{clean_text(unit.get('format'), 40)}；难度：{clean_text(unit.get('difficulty'), 20)}\n"
+            f"- 人话入口：{clean_text(unit.get('hook'), 240)}\n"
+            f"- 原文证据：{clean_text(unit.get('sourceEvidence'), 500)}\n"
+            f"- 边界：{clean_text(unit.get('boundary'), 500)}"
+        )
+    unit_block = "\n\n".join(unit_sections) or "本次旧格式维护记录未包含独立知识单元。"
     target = root / "wiki/03 主题与主张/来源解读" / f"{datetime.now().date().isoformat()} - 来源解读：{safe_filename(title)}.md"
     target.parent.mkdir(parents=True, exist_ok=True)
     markdown = f"""# 来源解读：{title}
@@ -271,6 +326,10 @@ def write_source_digest(root: Path, source_path: Path, plan: dict[str, Any]) -> 
 ## 关键点
 
 {points}
+
+## 可独立阅读的知识单元
+
+{unit_block}
 
 ## 与现有 Wiki 的关系
 

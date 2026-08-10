@@ -53,6 +53,9 @@ export type KnowledgeCard = {
   whyItMatters: string;
   coverUrl: string;
   tags: string;
+  topicFeatures: string;
+  unitKey: string;
+  recommendationReason?: string;
   sourceName: string;
   sourceUrl: string;
   verificationStatus: "unknown" | "verified" | "lead" | "official_link" | "needs_transcript";

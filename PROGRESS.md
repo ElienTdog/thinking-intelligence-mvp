@@ -9,3 +9,17 @@
 - 故障恢复：LaunchAgent 的 Python 权限路径已修复；现代 `/s/文章ID` 被 allowlist 误拒的 400 已修复并新增回归测试。
 - 前端验收：卡兹克、赛博禅心和 MacTalk 新文章已进入推荐前排；393px 收件箱无横向溢出，三屏顺序为收件箱 -> 推荐 -> 故事。
 - 验收完成：Python 115/115、前端 15/15、lint 0 error；隐私白名单未跟踪 Wiki 原文、图片、日志或密钥。
+
+## 轻量主题推荐开工回执 — 2026-08-10
+
+- 目标：保留旧排序展示，新增可学习的主题策略并以影子模式记录 20 张自然混排。
+- 顺序：推荐数据层 -> DeepSeek 多知识单元 -> TopicPolicy -> 影子接入 -> 红绿验收。
+- 当前基线：前端 15/15、skip 0；lint 0 error/1 既有 warning；沙箱外 Python 118/118。
+- 最大风险：影子曝光被误当实际反馈，或固定作者先验继续挤掉新主题。
+- 内容边界：仅可读已核验原文进入 DeepSeek；原文、个人判断和私有目录均不改不读。
+- 发布边界：本轮不 push、不部署，默认 SHADOW 不改变用户实际顺序。
+- 已完成：DeepSeek 为可读原文产出 3–6 个可追溯知识单元；TopicPolicy 支持动态主题、新题探索、反馈学习与自然混排。
+- 影子验证：LEGACY 仍是可见顺序，SHADOW 只记录候选曝光且不参与训练；故障注入移除 owner 条件时测试由 26/26 降为 25/26，恢复后回到 26/26。
+- 数据验证：8 个 SQLite 迁移首次全部应用，通过迁移账本第二次新应用数为 0；`recommendation_models` 与 `feed_impressions` 已生成。
+- 最终回归：`npm test` 27/27、skip 0；`npm run lint` 0 error/1 既有 warning；Python 120/120；`git diff --check` 通过。
+- 隐私边界：本次仅修改任务书允许的代码与进度文件；本地 `wiki/`、`thinking/`、`.obsidian/`、`Clippings/`、`.logs/` 均未跟踪，未 push、未部署。

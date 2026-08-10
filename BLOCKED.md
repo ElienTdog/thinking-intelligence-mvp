@@ -14,3 +14,7 @@ Saved version 1 failed only at production certificate provisioning:
 `Timed out waiting for the TLS certificate for thinking-intelligence-alpha.zyxelient.chatgpt.site`.
 
 The build, source push, D1 migration archive, and owner-only access-policy checks completed before this platform failure. Two deployment retries remain before stopping.
+
+## 轻量主题推荐 — 2026-08-10
+
+无新增阻塞。本任务按约束仅完成本地实现与影子验证，未 push、未部署。

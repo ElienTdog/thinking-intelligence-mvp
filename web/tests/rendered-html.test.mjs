@@ -243,3 +243,151 @@ test("refuses cross-owner and mismatched-material writes", () => {
   assert.equal(canWriteDelta(material, "question-b", "owner-a"), false);
   assert.equal(canWriteDelta(material, "question-a", "owner-b"), false);
 });
+
+test("parses open-ended topic features without a fixed taxonomy", async () => {
+  const { parseTopicFeatures } = await import("../app/lib/recommendation-policy.mjs");
+  const parsed = parseTopicFeatures({
+    sourceName: "新作者",
+    tags: '[]',
+    topicFeatures: JSON.stringify({ topic: "模型外交", subtopics: ["协议协商"], novelty: 0.9 }),
+  });
+  assert.equal(parsed.topic, "模型外交");
+  assert.deepEqual(parsed.subtopics, ["协议协商"]);
+});
+
+test("produces a reproducible natural slate for a fixed seed", async () => {
+  const { recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["A", "B", "C", "D"], 6);
+  const first = recommendTopicSlate(cards, "", { seed: "same", size: 20 });
+  const second = recommendTopicSlate(cards, "", { seed: "same", size: 20 });
+  assert.deepEqual(first.items.map((item) => item.card.id), second.items.map((item) => item.card.id));
+});
+
+test("keeps unseen topics eligible for exploration", async () => {
+  const { recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["熟悉主题", "全新主题", "相邻主题", "随机主题"], 4);
+  const slate = recommendTopicSlate(cards, "", { seed: "explore", size: 12 });
+  assert.ok(slate.items.some((item) => item.topic === "全新主题"));
+});
+
+test("positive actual feedback raises topic frequency before the cap", async () => {
+  const { recommendTopicSlate, trainTopicPolicy } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["A", "B", "C", "D", "E"], 4);
+  const before = recommendTopicSlate(cards, "", { seed: "x", size: 10 });
+  const observations = Array.from({ length: 8 }, (_, index) => ({
+    sessionId: `actual-${index}`, topic: "A", selectionProbability: 0.2, wasShown: true, eventType: "saved",
+  }));
+  const model = await trainTopicPolicy(cards, "", observations);
+  const after = recommendTopicSlate(cards, model, { seed: "x", size: 10 });
+  assert.ok(after.items.filter((item) => item.topic === "A").length > before.items.filter((item) => item.topic === "A").length);
+});
+
+test("shadow observations never train the topic model", async () => {
+  const { createTopicPolicy, trainTopicPolicy } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["A", "B"], 3);
+  const initial = createTopicPolicy(cards).toJSON();
+  const next = await trainTopicPolicy(cards, initial, [{
+    sessionId: "shadow", topic: "A", selectionProbability: 0.5, wasShown: false, eventType: "saved",
+  }]);
+  assert.equal(next, initial);
+});
+
+test("enforces topic share and consecutive-topic limits when inventory permits", async () => {
+  const { MAX_CONSECUTIVE_TOPIC, MAX_TOPIC_SHARE, recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const slate = recommendTopicSlate(topicCards(["A", "B", "C", "D"], 10), "", { seed: "limits", size: 20 });
+  const counts = Object.groupBy(slate.items, (item) => item.topic);
+  assert.ok(Math.max(...Object.values(counts).map((items) => items.length)) <= Math.floor(20 * MAX_TOPIC_SHARE));
+  assert.ok(slate.items.every((item, index, items) => index < MAX_CONSECUTIVE_TOPIC || !items.slice(index - MAX_CONSECUTIVE_TOPIC, index).every((prior) => prior.topic === item.topic)));
+});
+
+test("trusted creators are a prior but cannot monopolize a balanced slate", async () => {
+  const { recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const preferred = topicCards(["A", "B", "C"], 5, "数字生命卡兹克");
+  const others = topicCards(["D", "E", "F"], 5, "其他作者", "other");
+  const slate = recommendTopicSlate([...preferred, ...others], "", { seed: "creator-cap", size: 20 });
+  assert.ok(slate.items.filter((item) => item.card.sourceName === "数字生命卡兹克").length <= 10);
+  assert.ok(slate.items.some((item) => item.card.sourceName === "其他作者"));
+});
+
+test("less-like feedback strongly suppresses a card", async () => {
+  const { recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["A", "B", "C", "D"], 5);
+  const muted = cards[0];
+  const slate = recommendTopicSlate(cards, "", { seed: "muted", size: 5, events: [{ cardId: muted.id, eventType: "less_like" }] });
+  assert.ok(!slate.items.some((item) => item.card.id === muted.id));
+});
+
+test("accepts only three to six distinct traceable DeepSeek units", async () => {
+  const { parseKnowledgeUnits } = await import("../app/lib/knowledge-units.ts");
+  const units = Array.from({ length: 3 }, (_, index) => ({
+    title: `单元 ${index}`, hook: "入口", explanation: "解释", reasoningMove: "对照", boundary: "边界",
+    whyItMatters: "重要", tags: ["主题"], topic: `主题 ${index}`, subtopics: [], format: "案例",
+    difficulty: "中等", novelty: 0.5, sourceEvidence: `原文第 ${index + 1} 段`,
+  }));
+  assert.equal(parseKnowledgeUnits(JSON.stringify({ units })).length, 3);
+  assert.throws(() => parseKnowledgeUnits(JSON.stringify({ units: units.slice(0, 2) })), /3–6/);
+});
+
+test("declares owner-scoped shadow impressions and three recommender modes", async () => {
+  const [schema, migration, feedRoute, eventRoute] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0007_topic_bandit_shadow.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feed-events/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(schema, /recommendation_models/);
+  assert.match(schema, /feed_impressions/);
+  assert.match(migration, /topic_features/);
+  assert.match(feedRoute, /LEGACY.*BANDIT|BANDIT.*LEGACY/s);
+  assert.match(feedRoute, /bandit-shadow/);
+  assert.match(feedRoute, /ownerId: auth\.user\.userId/);
+  assert.match(eventRoute, /feedImpressions\.ownerId, auth\.user\.userId/);
+  assert.match(eventRoute, /feedImpressions\.wasShown, true/);
+});
+
+test("keeps the recommendation rationale available without exposing quotas", async () => {
+  const [feed, policy] = await Promise.all([
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/recommendation-policy.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(feed, /为什么推荐/);
+  assert.match(policy, /recommendationReason/);
+  assert.doesNotMatch(feed, /selectionProbability|MAX_TOPIC_SHARE|主题配额/);
+});
+
+function topicCards(topics, perTopic, creator = "普通作者", prefix = "card") {
+  return topics.flatMap((topic) => Array.from({ length: perTopic }, (_, index) => ({
+    id: `${prefix}-${topic}-${index}`,
+    sourceName: creator,
+    tags: JSON.stringify([`creator:${creator}`, topic]),
+    topicFeatures: JSON.stringify({ topic, subtopics: [`${topic}-子主题`], novelty: 0.6, creator }),
+    createdAt: new Date().toISOString(),
+    storyId: null,
+  })));
+}
+
+test("records actual and shadow orders under one session without training on shadow rows", async () => {
+  const { buildImpressionRows, recommendTopicSlate } = await import("../app/lib/recommendation-policy.mjs");
+  const cards = topicCards(["A", "B", "C", "D"], 3);
+  const shadow = recommendTopicSlate(cards, "", { seed: "paired-orders", size: 8 });
+  const rows = buildImpressionRows(cards.slice(0, 4), shadow.items, {
+    sessionId: "session-one", mode: "SHADOW", rankedLength: cards.length,
+  });
+  assert.deepEqual(new Set(rows.map((row) => row.sessionId)), new Set(["session-one"]));
+  assert.equal(rows.filter((row) => row.policy === "legacy" && row.wasShown).length, 4);
+  assert.equal(rows.filter((row) => row.policy === "bandit-shadow" && !row.wasShown).length, 8);
+  assert.equal(rows.some((row) => row.policy === "bandit-shadow" && row.wasShown), false);
+});
+
+test("offers an authenticated smart-mix preview without changing the default mode", async () => {
+  const [route, dashboard, feed] = await Promise.all([
+    readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(route, /preview === "bandit"/);
+  assert.match(route, /RECOMMENDER_MODE[^]*\|\| "SHADOW"/);
+  assert.match(dashboard, /preview=bandit/);
+  assert.match(feed, /当前排序/);
+  assert.match(feed, /智能混排/);
+});

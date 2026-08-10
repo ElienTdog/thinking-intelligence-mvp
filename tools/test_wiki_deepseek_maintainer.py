@@ -95,3 +95,40 @@ class WikiDeepSeekMaintainerTests(unittest.TestCase):
         self.assertEqual(summary, "文章强调先理解真实约束，再验证 AI 产出。")
         self.assertIn("[[01 原始材料/文章]]", content)
         self.assertIn("上下文比漂亮提示词更关键", content)
+
+    def test_deepseek_plan_requires_three_distinct_traceable_units(self):
+        unit = {
+            "title": "验证比提示词长度重要",
+            "hook": "先决定怎么知道 AI 做对了。",
+            "explanation": "原文比较了提示词与验证条件。",
+            "topic": "AI 验证",
+            "subtopics": ["停止条件"],
+            "format": "方法",
+            "difficulty": "中等",
+            "novelty": 0.7,
+            "reasoningMove": "从结果倒推验证",
+            "boundary": "不适用于无可观察结果的任务",
+            "whyItMatters": "避免只优化输入形式",
+            "sourceEvidence": "原文的验证条件段落",
+        }
+        plan = {"units": [dict(unit, title=f"知识点 {index}") for index in range(3)]}
+        self.assertEqual(len(MODULE.validate_knowledge_units(plan)), 3)
+        with self.assertRaisesRegex(RuntimeError, "3–6"):
+            MODULE.validate_knowledge_units({"units": plan["units"][:2]})
+
+    def test_digest_keeps_deepseek_units_and_source_evidence(self):
+        root = self.make_root()
+        source = root / "wiki/01 原始材料/文章.md"
+        source.write_text('---\nsource: "https://example.com/article"\n---\n\n' + "正文" * 500, encoding="utf-8")
+        base = {
+            "hook": "一句人话入口", "explanation": "解释", "topic": "动态主题", "subtopics": ["边界"],
+            "format": "案例", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "对照",
+            "boundary": "只在来源范围内", "whyItMatters": "可迁移", "sourceEvidence": "原文第二段",
+        }
+        digest, _ = MODULE.write_source_digest(root, source, {
+            "sourceSummary": "摘要",
+            "units": [dict(base, title=f"知识点 {index}") for index in range(3)],
+        })
+        content = digest.read_text(encoding="utf-8")
+        self.assertIn("## 可独立阅读的知识单元", content)
+        self.assertEqual(content.count("原文证据：原文第二段"), 3)
