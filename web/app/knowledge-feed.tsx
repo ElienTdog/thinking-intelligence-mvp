@@ -145,13 +145,30 @@ function KnowledgeCardView({
   const tags = parseTags(card.tags);
   const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
   const [hasCover, setHasCover] = useState(Boolean(card.coverUrl));
+  const touchOrigin = useRef<{ x: number; y: number } | null>(null);
+  const suppressOpen = useRef(false);
 
   function openSource(event: MouseEvent<HTMLAnchorElement>) {
     event.stopPropagation();
     onEvent(card.id, "opened_source");
   }
 
-  return <article className={`knowledge-card tone-${index % 3}${hasCover ? " has-cover" : " is-text-only"}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
+  return <article className={`knowledge-card tone-${index % 3}${hasCover ? " has-cover" : " is-text-only"}`} tabIndex={0}
+    onTouchStart={(event) => {
+      const touch = event.touches[0];
+      touchOrigin.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      suppressOpen.current = false;
+    }}
+    onTouchMove={(event) => {
+      const origin = touchOrigin.current;
+      const touch = event.touches[0];
+      if (!origin || !touch) return;
+      if (Math.hypot(touch.clientX - origin.x, touch.clientY - origin.y) > 12) suppressOpen.current = true;
+    }}
+    onClick={() => {
+      if (suppressOpen.current) { suppressOpen.current = false; return; }
+      onOpen();
+    }} onKeyDown={(event) => {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
     <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
@@ -182,7 +199,10 @@ function KnowledgeDetail({ card, onClose, onEvent, onLinkQuestion, onRemoveSourc
   onStartPractice: (pageId: string, promptType: LearningPromptType) => void;
 }) {
   const connections = getConnections(card.wikiPageId, wiki);
-  return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}>
+  return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}
+    onTouchStart={(event) => event.stopPropagation()}
+    onTouchMove={(event) => event.stopPropagation()}
+    onTouchEnd={(event) => event.stopPropagation()}>
     <div className="detail-head"><span>知识点深读 · {card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
     <KnowledgeCover url={card.coverUrl} detail />
     <h2>{card.title}</h2>

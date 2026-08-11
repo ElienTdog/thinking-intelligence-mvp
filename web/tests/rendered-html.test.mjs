@@ -160,9 +160,10 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.doesNotMatch(dashboard, /requestJson\("\/api\/injection\/run", \{\}\)/);
   assert.match(dashboard, /连接本地 Wiki/);
   assert.match(dashboard, /在线阅读/);
-  assert.match(dashboard, /surface === "raw" && direction === "right"/);
-  assert.match(dashboard, /surface === "story" && direction === "left"/);
-  assert.match(dashboard, /surface === "raw" \? "is-current"/);
+  assert.match(dashboard, /surface === "story" && direction === "right"/);
+  assert.match(dashboard, /surface === "raw" && direction === "left"/);
+  assert.match(dashboard, /surface === "story" \? "is-current"/);
+  assert.match(dashboard, /surface === "feed"\) setSurface\(direction === "left" \? "story" : "raw"\)/);
   assert.match(dashboard, /requestJson\(`\/api\/clips\/\$\{clip\.id\}`, undefined, "DELETE"\)/);
   assert.match(deleteRoute, /knowledgeCards\.ownerId/);
   assert.match(deleteRoute, /feedEvents/);
@@ -177,6 +178,9 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(knowledgeFeed, /knowledge-excerpt/);
   assert.match(knowledgeFeed, /compactHook/);
   assert.match(knowledgeFeed, /compactExplanation/);
+  assert.match(knowledgeFeed, /suppressOpen/);
+  assert.match(knowledgeFeed, /Math\.hypot/);
+  assert.match(knowledgeFeed, /onTouchStart=\{\(event\) => event\.stopPropagation\(\)\}/);
   assert.match(knowledgeFeed, /把这条知识变成自己的/);
   assert.match(knowledgeFeed, /用自己的话复述/);
   assert.match(knowledgeFeed, /换个场景试用/);

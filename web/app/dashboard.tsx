@@ -270,9 +270,9 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   }
 
   function moveSurface(direction: "left" | "right") {
-    if (surface === "raw" && direction === "right") setSurface("feed");
-    if (surface === "feed") setSurface(direction === "left" ? "raw" : "story");
-    if (surface === "story" && direction === "left") setSurface("feed");
+    if (surface === "story" && direction === "right") setSurface("feed");
+    if (surface === "feed") setSurface(direction === "left" ? "story" : "raw");
+    if (surface === "raw" && direction === "left") setSurface("feed");
   }
 
   function beginTouch(event: React.TouchEvent<HTMLElement>) {
@@ -288,7 +288,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     const vertical = touch.clientY - start.y;
     if (Math.abs(horizontal) < 10 || Math.abs(horizontal) <= Math.abs(vertical)) return;
     event.preventDefault();
-    const blocked = (surface === "story" && horizontal < 0) || (surface === "raw" && horizontal > 0);
+    const blocked = (surface === "raw" && horizontal < 0) || (surface === "story" && horizontal > 0);
     const maxDrag = Math.min(window.innerWidth * 0.3, 160);
     setIsDraggingSurface(true);
     setDragOffset(Math.max(-maxDrag, Math.min(maxDrag, blocked ? horizontal * 0.18 : horizontal)));
@@ -310,7 +310,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
 
   if (!data) return <main className="loading" aria-busy="true"><div className="loading-stack"><span /><span /><span /></div><p>正在打开知识流</p></main>;
 
-  const surfaceIndex = surface === "raw" ? 0 : surface === "feed" ? 1 : 2;
+  const surfaceIndex = surface === "story" ? 0 : surface === "feed" ? 1 : 2;
   const practicePage = practice ? data.wiki.pages.find((page) => page.id === practice.pageId) ?? null : null;
 
   return <main
@@ -323,25 +323,45 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
     <div className="feed-chrome" aria-label="知识流控制">
       <button className="capture-trigger" onClick={() => setShowCapture(true)} aria-label="收录内容" title="收录内容">+</button>
       <div className="surface-mark" aria-label={surface === "feed" ? "推荐" : surface === "story" ? "故事" : "来源收件箱"}>
-        <span className={surface === "raw" ? "is-current" : ""} />
-        <span className={surface === "feed" ? "is-current" : ""} />
         <span className={surface === "story" ? "is-current" : ""} />
+        <span className={surface === "feed" ? "is-current" : ""} />
+        <span className={surface === "raw" ? "is-current" : ""} />
       </div>
       <button className="feed-account" aria-label={`当前用户：${displayName}`} title={displayName}>{displayName.slice(0, 1) || "我"}</button>
     </div>
 
     {notice && <p className="feed-toast" role="status">{notice}</p>}
 
-    {surface !== "raw" && <button className="surface-edge surface-edge--left" onClick={() => moveSurface("left")} aria-label={surface === "feed" ? "查看来源收件箱" : "回到推荐"} title={surface === "feed" ? "来源收件箱" : "推荐"}>‹</button>}
-    {surface !== "story" && <button className="surface-edge surface-edge--right" onClick={() => moveSurface("right")} aria-label={surface === "feed" ? "进入今日故事" : "回到推荐"} title={surface === "feed" ? "今日故事" : "推荐"}>›</button>}
+    {surface !== "story" && <button className="surface-edge surface-edge--left" onClick={() => moveSurface("left")} aria-label={surface === "feed" ? "进入今日故事" : "回到推荐"} title={surface === "feed" ? "今日故事" : "推荐"}>‹</button>}
+    {surface !== "raw" && <button className="surface-edge surface-edge--right" onClick={() => moveSurface("right")} aria-label={surface === "feed" ? "查看来源收件箱" : "回到推荐"} title={surface === "feed" ? "来源收件箱" : "推荐"}>›</button>}
 
     <div
       className="surface-track"
       style={{ transform: `translate3d(calc(-${surfaceIndex * 100}vw + ${dragOffset}px), 0, 0)` }}
       aria-live="polite"
     >
-      <section className="surface-panel" aria-hidden={surface !== "raw"}>
-        <RawSurface clips={data.clips} syncStatus={syncStatus} removingId={removingId} retryingId={retryingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onRetry={retrySource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
+      <section className="surface-panel" aria-hidden={surface !== "story"}>
+        <KnowledgeFeed
+          mode="story"
+          active={surface === "story"}
+          cards={feedCards}
+          story={data.todayStory}
+          storyCards={data.storyCards}
+          wiki={data.wiki}
+          hasMore={false}
+          isGenerating={isGenerating}
+          onEvent={recordFeedEvent}
+          onLoadMore={loadMoreFeed}
+          onOpenStory={() => setSurface("story")}
+          onGenerateToday={generateToday}
+          onLinkQuestion={setLinkingCard}
+          onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
+          onOpenSources={() => setSurface("raw")}
+          onRemoveSource={(rawSourceId) => {
+            const clip = data.clips.find((item) => item.id === rawSourceId);
+            if (clip) void removeSource(clip);
+          }}
+        />
       </section>
       <section className="surface-panel" aria-hidden={surface !== "feed"}>
         <KnowledgeFeed
@@ -366,28 +386,8 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
           }}
         />
       </section>
-      <section className="surface-panel" aria-hidden={surface !== "story"}>
-        <KnowledgeFeed
-          mode="story"
-          active={surface === "story"}
-          cards={feedCards}
-          story={data.todayStory}
-          storyCards={data.storyCards}
-          wiki={data.wiki}
-          hasMore={false}
-          isGenerating={isGenerating}
-          onEvent={recordFeedEvent}
-          onLoadMore={loadMoreFeed}
-          onOpenStory={() => setSurface("story")}
-          onGenerateToday={generateToday}
-          onLinkQuestion={setLinkingCard}
-          onStartPractice={(pageId, promptType) => setPractice({ pageId, promptType })}
-          onOpenSources={() => setSurface("raw")}
-          onRemoveSource={(rawSourceId) => {
-            const clip = data.clips.find((item) => item.id === rawSourceId);
-            if (clip) void removeSource(clip);
-          }}
-        />
+      <section className="surface-panel" aria-hidden={surface !== "raw"}>
+        <RawSurface clips={data.clips} syncStatus={syncStatus} removingId={removingId} retryingId={retryingId} onCapture={() => setShowCapture(true)} onRemove={removeSource} onRetry={retrySource} onOpenWiki={openWiki} onConnect={() => void createSyncToken()} onRead={setReadingClip} />
       </section>
     </div>
 
