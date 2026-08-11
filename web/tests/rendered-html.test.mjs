@@ -364,17 +364,22 @@ test("keeps the recommendation rationale available without exposing quotas", asy
 });
 
 test("uses a denser text card without a cover and a full-screen mobile detail", async () => {
-  const [feed, css] = await Promise.all([
+  const [feed, css, layout] = await Promise.all([
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(feed, /is-text-only/);
   assert.match(feed, /进一步理解/);
   assert.match(css, /\.knowledge-card\.is-text-only \.knowledge-copy/);
   assert.match(css, /\.knowledge-excerpt p/);
-  assert.match(css, /\.knowledge-detail \{ inset:0; width:100%; max-height:none;/);
+  assert.match(css, /\.knowledge-detail \{ inset:0; width:100dvw; max-width:100dvw; height:100dvh; max-height:100dvh;/);
   assert.doesNotMatch(css, /\.knowledge-detail \{ top:auto; max-height:82dvh;/);
   assert.match(css, /\.detail-actions \{ display:grid;/);
+  assert.match(css, /overflow-x:hidden/);
+  assert.match(layout, /export const viewport: Viewport/);
+  assert.match(layout, /width: "device-width"/);
+  assert.match(layout, /viewportFit: "cover"/);
 });
 
 function topicCards(topics, perTopic, creator = "普通作者", prefix = "card") {
