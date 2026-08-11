@@ -89,7 +89,6 @@ export function KnowledgeFeed({
       card={selected}
       onClose={() => setSelected(null)}
       onEvent={onEvent}
-      onOpenStory={onOpenStory}
       onLinkQuestion={() => { setSelected(null); onLinkQuestion(selected); }}
       onRemoveSource={() => { setSelected(null); onRemoveSource(selected.rawSourceId); }}
       wiki={wiki}
@@ -145,18 +144,23 @@ function KnowledgeCardView({
 }) {
   const tags = parseTags(card.tags);
   const creator = tags.find((tag) => tag.startsWith("creator:"))?.slice(8);
+  const [hasCover, setHasCover] = useState(Boolean(card.coverUrl));
 
   function openSource(event: MouseEvent<HTMLAnchorElement>) {
     event.stopPropagation();
     onEvent(card.id, "opened_source");
   }
 
-  return <article className={`knowledge-card tone-${index % 3}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
+  return <article className={`knowledge-card tone-${index % 3}${hasCover ? " has-cover" : " is-text-only"}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
   }}>
     <div className="knowledge-topline"><span>{chapter ? `第 ${chapter} 节` : creator ? `关注作者 · ${creator}` : tags[0] || "AI 与产品"}</span><span>{card.verificationStatus === "verified" ? "已核验" : "主动收录"}</span></div>
-    <KnowledgeCover url={card.coverUrl} />
-    <div className="knowledge-copy"><h2>{card.title}</h2><p>{compactHook(card.hook)}</p></div>
+    <KnowledgeCover url={card.coverUrl} onUnavailable={() => setHasCover(false)} />
+    <div className="knowledge-copy">
+      <h2>{card.title}</h2>
+      <p>{compactHook(card.hook)}</p>
+      {!hasCover && <div className="knowledge-excerpt"><span>进一步理解</span><p>{compactExplanation(card.explanation || card.whyItMatters)}</p></div>}
+    </div>
     <div className="knowledge-bottom">
       <div className="knowledge-source"><span>{card.sourceName}</span>{card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={openSource}>原文</a>}</div>
       <div className="knowledge-actions" onClick={(event) => event.stopPropagation()}>
@@ -168,11 +172,10 @@ function KnowledgeCardView({
   </article>;
 }
 
-function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, onRemoveSource, wiki, onStartPractice }: {
+function KnowledgeDetail({ card, onClose, onEvent, onLinkQuestion, onRemoveSource, wiki, onStartPractice }: {
   card: KnowledgeCard;
   onClose: () => void;
   onEvent: (cardId: string, eventType: FeedEventType) => void;
-  onOpenStory: () => void;
   onLinkQuestion: () => void;
   onRemoveSource: () => void;
   wiki: WikiSnapshot;
@@ -180,32 +183,36 @@ function KnowledgeDetail({ card, onClose, onEvent, onOpenStory, onLinkQuestion, 
 }) {
   const connections = getConnections(card.wikiPageId, wiki);
   return <section className="knowledge-detail" role="dialog" aria-modal="true" aria-label={card.title}>
-    <div className="detail-head"><span>{card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
+    <div className="detail-head"><span>知识点深读 · {card.sourceName}</span><button onClick={onClose} aria-label="关闭详情">×</button></div>
     <KnowledgeCover url={card.coverUrl} detail />
     <h2>{card.title}</h2>
-    <section><p>它在说什么</p><strong>{card.hook}</strong></section>
-    <section><p>关键点</p><strong>{card.explanation}</strong></section>
-    <section><p>推理动作</p><span>{card.reasoningMove}</span></section>
-    <section><p>适用边界</p><span>{card.boundary}</span></section>
-    <section><p>为什么重要</p><span>{card.whyItMatters}</span></section>
-    {card.recommendationReason && <section><p>为什么推荐</p><span>{card.recommendationReason}</span></section>}
+    <section><p>核心观点</p><strong>{card.hook}</strong></section>
+    <section><p>为什么成立</p><strong>{card.explanation}</strong></section>
+    <section><p>思考方式</p><span>{card.reasoningMove}</span></section>
+    <section><p>什么时候不适用</p><span>{card.boundary}</span></section>
+    <section><p>对我有什么用</p><span>{card.whyItMatters}</span></section>
+    {card.recommendationReason && <section><p>为什么给我</p><span>{card.recommendationReason}</span></section>}
     {connections.length > 0 && <section className="wiki-connections"><p>在 Wiki 里</p><strong>{connections.map((connection) => connection.title).join(" · ")}</strong><span>这些连接只表示主题或阅读关联；是否支持、冲突或适用，仍需回到各自原文判断。</span></section>}
-    <div className="detail-actions">
-      {card.sourceUrl && <a href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onEvent(card.id, "opened_source")}>打开原文</a>}
-      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "recall")}>复述</button>}
-      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "transfer")}>迁移</button>}
-      {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "counter")}>反驳</button>}
-      <button onClick={onLinkQuestion}>放进问题</button>
-      {card.storyId && <button onClick={onOpenStory}>今日故事</button>}
-      <button className="remove-source" onClick={onRemoveSource}>移除来源</button>
-    </div>
+    <section className="detail-next">
+      <p>下一步</p>
+      <strong>把这条知识变成自己的</strong>
+      <span>先读懂，再选一种方式检验：能否复述、迁移，或指出它不成立的地方。</span>
+      <div className="detail-actions">
+        {card.sourceUrl && <a className="primary-action" href={card.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onEvent(card.id, "opened_source")}>阅读完整原文</a>}
+        {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "recall")}>用自己的话复述</button>}
+        {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "transfer")}>换个场景试用</button>}
+        {card.wikiPageId && <button onClick={() => onStartPractice(card.wikiPageId!, "counter")}>找一个反例</button>}
+        <button className="wide-action" onClick={onLinkQuestion}>放进我正在思考的问题</button>
+      </div>
+    </section>
+    <button className="detail-remove" onClick={onRemoveSource}>不再保留这篇来源</button>
   </section>;
 }
 
-function KnowledgeCover({ url, detail = false }: { url: string; detail?: boolean }) {
+function KnowledgeCover({ url, detail = false, onUnavailable }: { url: string; detail?: boolean; onUnavailable?: () => void }) {
   const [unavailable, setUnavailable] = useState(false);
   if (!url || unavailable) return null;
-  const image = <img className={detail ? "detail-cover" : ""} src={url} alt="" onError={() => setUnavailable(true)} />;
+  const image = <img className={detail ? "detail-cover" : ""} src={url} alt="" onError={() => { setUnavailable(true); onUnavailable?.(); }} />;
   return detail ? image : <div className="knowledge-cover">{image}</div>;
 }
 
@@ -235,6 +242,11 @@ function parseTags(value: string) {
 function compactHook(value: string) {
   const compact = value.replace(/^文章(?:介绍|讲述|讨论|分享)[：:]?\s*/, "").replace(/\s+/g, " ").trim();
   return compact.length > 86 ? `${compact.slice(0, 86)}...` : compact;
+}
+
+function compactExplanation(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
 }
 
 function isFollowedCreator(card: KnowledgeCard) {

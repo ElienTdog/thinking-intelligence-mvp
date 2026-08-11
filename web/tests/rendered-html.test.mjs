@@ -172,8 +172,16 @@ test("declares the owner-scoped feed and local Wiki mirror surfaces", async () =
   assert.match(knowledgeFeed, /在 Wiki 里/);
   assert.match(knowledgeFeed, /knowledge-cover/);
   assert.match(knowledgeFeed, /KnowledgeCover/);
-  assert.match(knowledgeFeed, /onError=\{\(\) => setUnavailable\(true\)\}/);
+  assert.match(knowledgeFeed, /onUnavailable=\{\(\) => setHasCover\(false\)\}/);
+  assert.match(knowledgeFeed, /setUnavailable\(true\); onUnavailable\?\.\(\)/);
+  assert.match(knowledgeFeed, /knowledge-excerpt/);
   assert.match(knowledgeFeed, /compactHook/);
+  assert.match(knowledgeFeed, /compactExplanation/);
+  assert.match(knowledgeFeed, /把这条知识变成自己的/);
+  assert.match(knowledgeFeed, /用自己的话复述/);
+  assert.match(knowledgeFeed, /换个场景试用/);
+  assert.match(knowledgeFeed, /找一个反例/);
+  assert.match(knowledgeFeed, /放进我正在思考的问题/);
   assert.match(wikiRoute, /getWikiLint/);
   assert.match(wikiQueryRoute, /queryWiki/);
   assert.match(wikiModel, /refreshTopicIndexes/);
@@ -350,9 +358,23 @@ test("keeps the recommendation rationale available without exposing quotas", asy
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/recommendation-policy.mjs", import.meta.url), "utf8"),
   ]);
-  assert.match(feed, /为什么推荐/);
+  assert.match(feed, /为什么给我/);
   assert.match(policy, /recommendationReason/);
   assert.doesNotMatch(feed, /selectionProbability|MAX_TOPIC_SHARE|主题配额/);
+});
+
+test("uses a denser text card without a cover and a full-screen mobile detail", async () => {
+  const [feed, css] = await Promise.all([
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(feed, /is-text-only/);
+  assert.match(feed, /进一步理解/);
+  assert.match(css, /\.knowledge-card\.is-text-only \.knowledge-copy/);
+  assert.match(css, /\.knowledge-excerpt p/);
+  assert.match(css, /\.knowledge-detail \{ inset:0; width:100%; max-height:none;/);
+  assert.doesNotMatch(css, /\.knowledge-detail \{ top:auto; max-height:82dvh;/);
+  assert.match(css, /\.detail-actions \{ display:grid;/);
 });
 
 function topicCards(topics, perTopic, creator = "普通作者", prefix = "card") {
