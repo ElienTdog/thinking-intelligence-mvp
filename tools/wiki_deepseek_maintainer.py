@@ -38,6 +38,11 @@ QUESTION_PATHS = {
 }
 INDEX_START = "<!-- deepseek-maintained:start -->"
 INDEX_END = "<!-- deepseek-maintained:end -->"
+DEFAULT_SOURCE_LIMIT = 10
+DEFAULT_UNIT_TARGET = 10
+MAX_EXISTING_PAGES = 12
+MAX_EXISTING_PAGE_CHARS = 1600
+MAX_SOURCE_CHARS = 18000
 
 
 def clean_text(value: object, limit: int = 0) -> str:
@@ -111,6 +116,19 @@ def post_json(payload: dict[str, Any], api_key: str) -> Any:
         raise RuntimeError(f"无法连接 DeepSeek：{error.reason}") from error
 
 
+def response_usage(response: Any) -> dict[str, int]:
+    usage = response.get("usage", {}) if isinstance(response, dict) else {}
+    return {
+        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+    }
+
+
+def add_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:
+    return {key: first.get(key, 0) + second.get(key, 0) for key in {**first, **second}}
+
+
 def read_state(root: Path) -> dict[str, Any]:
     path = root / STATE_PATH
     if not path.exists():
@@ -159,8 +177,10 @@ def candidate_pages(root: Path) -> list[dict[str, str]]:
         content = full_path.read_text(encoding="utf-8")
         pages.append({
             "path": full_path.relative_to(root).as_posix(),
-            "content": content[:6000],
+            "content": content[:MAX_EXISTING_PAGE_CHARS],
         })
+        if len(pages) >= MAX_EXISTING_PAGES:
+            break
     return pages
 
 
@@ -210,7 +230,7 @@ def maintenance_plan(root: Path, source_path: Path, source_content: str, api_key
 
 原始文章路径：{source_relative}
 原始文章：
-{source_content[:18000]}
+{source_content[:MAX_SOURCE_CHARS]}
 
 existingPages：
 {json.dumps(pages, ensure_ascii=False)}"""
@@ -226,6 +246,8 @@ existingPages：
         "max_tokens": 5000,
     }
     response = post_json(payload, api_key)
+    usage = response_usage(response)
+    api_calls = 1
     content = response.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(response, dict) else ""
     result = parse_json_object(content, "DeepSeek 没有返回可解析的维护计划")
     try:
@@ -241,9 +263,17 @@ existingPages：
             "max_tokens": 6000,
         }
         repaired = post_json(repair_payload, api_key)
+        usage = add_usage(usage, response_usage(repaired))
+        api_calls += 1
         repaired_content = repaired.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(repaired, dict) else ""
         result = parse_json_object(repaired_content, "DeepSeek 修复后仍未返回可解析的维护计划")
         validate_knowledge_units(result)
+    result["_deepseek_api"] = {
+        "provider": "DeepSeek API",
+        "model": model,
+        "api_calls": api_calls,
+        **usage,
+    }
     return result
 
 
@@ -435,16 +465,40 @@ def pending_sources(root: Path, state: dict[str, Any], force: bool = False, crea
     ]
 
 
-def maintain(root: Path, api_key: str, model: str, limit: int = 3, force: bool = False, creators: set[str] | None = None) -> tuple[int, int]:
+def maintain(
+    root: Path,
+    api_key: str,
+    model: str,
+    limit: int = DEFAULT_SOURCE_LIMIT,
+    force: bool = False,
+    creators: set[str] | None = None,
+    target_units: int = DEFAULT_UNIT_TARGET,
+) -> tuple[int, int]:
     state = read_state(root)
     known = state["sources"]
     pending = pending_sources(root, state, force, creators)
+    pending_before_limit = len(pending)
     if limit > 0:
         pending = pending[:limit]
     processed = 0
+    knowledge_units = 0
+    api_calls = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    failures: list[dict[str, str]] = []
     for path in pending:
         source = path.read_text(encoding="utf-8")
-        plan = maintenance_plan(root, path, source, api_key, model)
+        try:
+            plan = maintenance_plan(root, path, source, api_key, model)
+        except RuntimeError as error:
+            failures.append({
+                "source": path.relative_to(root).as_posix(),
+                "error": clean_text(error, 300),
+            })
+            continue
+        unit_count = len(validate_knowledge_units(plan))
+        api = plan.get("_deepseek_api", {}) if isinstance(plan.get("_deepseek_api"), dict) else {}
         digest = write_source_digest(root, path, plan)
         pages = [digest, *apply_plan(root, path, plan)]
         question = clean_text(plan.get("understandingQuestion"), 260)
@@ -452,21 +506,52 @@ def maintain(root: Path, api_key: str, model: str, limit: int = 3, force: bool =
         known[path.relative_to(root).as_posix()] = {
             "hash": source_hash(source),
             "maintained_at": datetime.now().isoformat(timespec="seconds"),
+            "provider": "DeepSeek API",
             "model": model,
+            "api_calls": int(api.get("api_calls") or 1),
+            "prompt_tokens": int(api.get("prompt_tokens") or 0),
+            "completion_tokens": int(api.get("completion_tokens") or 0),
+            "total_tokens": int(api.get("total_tokens") or 0),
+            "knowledge_units": unit_count,
             "pages": [page.relative_to(root).as_posix() for page, _ in pages],
         }
         write_state(root, state)
         processed += 1
+        knowledge_units += unit_count
+        api_calls += int(api.get("api_calls") or 1)
+        prompt_tokens += int(api.get("prompt_tokens") or 0)
+        completion_tokens += int(api.get("completion_tokens") or 0)
+        total_tokens += int(api.get("total_tokens") or 0)
+        if target_units > 0 and knowledge_units >= target_units:
+            break
+    state["last_run"] = {
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
+        "provider": "DeepSeek API",
+        "model": model,
+        "source_limit": limit,
+        "unit_target": target_units,
+        "sources_processed": processed,
+        "knowledge_units": knowledge_units,
+        "unit_shortfall": max(0, target_units - knowledge_units),
+        "pending_readable_sources": pending_before_limit,
+        "api_calls": api_calls,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "failures": failures,
+    }
+    write_state(root, state)
     if processed:
         update_index(root, index_pages_from_state(root, state))
-    return processed, len(pending)
+    return processed, pending_before_limit
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Use DeepSeek to maintain the Wiki from readable raw sources.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--limit", type=int, default=3, help="每次最多维护几篇；0 表示全部")
+    parser.add_argument("--limit", type=int, default=DEFAULT_SOURCE_LIMIT, help="每次最多维护几篇；0 表示全部")
+    parser.add_argument("--target-units", type=int, default=DEFAULT_UNIT_TARGET, help="本轮至少产出的知识点目标；正文不足时记录缺口")
     parser.add_argument("--force", action="store_true", help="重新维护已处理过的原文")
     parser.add_argument("--creator", action="append", default=[], help="只维护指定作者；可重复使用")
     parser.add_argument("--reindex", action="store_true", help="根据已有维护状态重建索引中的 DeepSeek 区块")
@@ -485,11 +570,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         api_key = load_api_key()
-        processed, _ = maintain(root, api_key, args.model, args.limit, args.force, creators)
+        processed, _ = maintain(root, api_key, args.model, args.limit, args.force, creators, args.target_units)
     except RuntimeError as error:
         print(f"DeepSeek Wiki maintenance failed: {error}", file=sys.stderr)
         return 1
-    print(f"DeepSeek Wiki maintenance: processed={processed}, pending_before_limit={len(pending)}")
+    last_run = read_state(root).get("last_run", {})
+    print(
+        "DeepSeek Wiki maintenance: "
+        f"processed={processed}, knowledge_units={last_run.get('knowledge_units', 0)}, "
+        f"unit_target={args.target_units}, unit_shortfall={last_run.get('unit_shortfall', args.target_units)}, "
+        f"api_calls={last_run.get('api_calls', 0)}, total_tokens={last_run.get('total_tokens', 0)}, "
+        f"pending_before_limit={len(pending)}"
+    )
     return 0
 
 

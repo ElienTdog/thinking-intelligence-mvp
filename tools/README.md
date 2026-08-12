@@ -23,7 +23,7 @@ DEEPSEEK_API_KEY=... python3 tools/aihot_wiki_deepseek.py --write
 python3 tools/wiki_inbox_sync.py --server "https://your-private-thinking-site.example" --token "wiki_..." --configure
 python3 tools/wiki_inbox_sync.py --server "https://your-private-thinking-site.example"
 python3 tools/wechat_capture_bridge.py --show-token
-python3 tools/wiki_deepseek_maintainer.py --limit 3
+python3 tools/wiki_deepseek_maintainer.py --limit 10 --target-units 10
 bash tools/install_wiki_sync_launch_agent.sh "https://your-private-thinking-site.example"
 \# Make DeepSeek maintain new Web Clipper articles at login and each morning.
 bash tools/install_wiki_deepseek_maintainer_launch_agent.sh
@@ -93,13 +93,13 @@ python3 tools/thinking_steward.py lint
 - `wiki-migrate`：把旧来源索引迁到 `wiki/01 原始材料`，把旧 thinking card 迁到 `wiki/03 主题与主张`；默认只预览，`--write` 才会写入。迁入页保留“待原文复核”状态，不会把旧摘要冒充成已验证正文。
 - `wiki-capture-lead`：把 AI HOT 或雷达发现的线索写入 `wiki/01 原始材料/AI HOT 线索`。它始终标为 `lead；原文待核验`，不会自动更新主题、问题或我的判断。
 - `wiki-lint`：检查 `wiki/` 的系统文件、来源元数据和主题页的主张/边界/验证结构。
-- `aihot_wiki_deepseek.py`：用 DeepSeek 对 AI HOT 24 小时精选做 Q1/Q2 相关性筛选，并以 `lead；原文待核验` 写入 `wiki/01 原始材料/AI HOT 线索`。它不会把摘要当正文，也不会自动改写主题或“我的判断”；密钥优先从 `DEEPSEEK_API_KEY` 读取，否则读取 macOS 钥匙串中服务名为 `thinking-wiki-deepseek` 的条目。
+- `aihot_wiki_deepseek.py`：用 DeepSeek 对 AI HOT 24 小时精选做开放主题筛选，并以 `lead；原文待核验` 写入 `wiki/01 原始材料/AI HOT 线索`。带 `links.original` 的候选会同时进入 `wiki/00 系统/aihot-discovery-inbox.json`，等待正文抓取。它不受 Q1/Q2 review 状态限制，不会把摘要当正文，也不会自动改写主题或“我的判断”；密钥优先从 `DEEPSEEK_API_KEY` 读取，否则读取 macOS 钥匙串中服务名为 `thinking-wiki-deepseek` 的条目。
 - `wechat_capture_bridge.py`：只监听 `127.0.0.1:8765` 的本地采集桥。它以随机钥匙串令牌、微信 URL allowlist、URL 哈希幂等和加载超时连接浏览器扩展；不读取 Cookie、浏览器 profile，也不绕过登录或验证。
 - `web/capture-bridge-extension/`：Chrome/Edge 的本地解压扩展。首次加载后，在扩展选项里粘贴 `python3 tools/wechat_capture_bridge.py --show-token` 显示的令牌；之后它只提取用户浏览器中正常可见的公众号正文与图片。
-- `wiki_inbox_sync.py`：从在线收件箱取回链接，调用本地浏览器采集桥，把可读正文和校验通过的图片写入 `wiki/01 原始材料`，再让 DeepSeek 维护并镜像线上。受限页停在“需用户打开”，不会生成知识页或推荐卡。
-- `wiki_deepseek_maintainer.py`：扫描尚未维护的可读原始材料，用 DeepSeek 为每篇文章生成一页“来源解读”，并按需更新 `02`-`05`、`index.md` 和 `log.md`。默认每轮最多维护 3 篇，用 `--limit 0` 补处理全部，`--force` 可重新维护，`--reindex` 可重建索引入口；永不改写原文、`06 我的判断` 或 `07 练习与案例`。
+- `wiki_inbox_sync.py`：从在线收件箱和 AI HOT 本地发现队列取回链接，调用本地浏览器采集桥，把可读正文和校验通过的图片写入 `wiki/01 原始材料`，再让 DeepSeek 维护并镜像线上。AI HOT 线索页不会被误判成已抓正文；受限页停在“需用户打开”，不会生成知识页或推荐卡。
+- `wiki_deepseek_maintainer.py`：扫描尚未维护的可读原始材料，用 DeepSeek API 为每篇文章生成 3-6 个可独立阅读的知识单元和一页“来源解读”，并按需更新 `02`-`05`、`index.md` 和 `log.md`。默认以每轮至少 10 个知识单元为目标、最多处理 10 篇；正文不足时如实记录缺口，不用摘要或虚构内容补数。状态文件会记录模型、API 调用次数与 token 用量；`--limit 0` 可补处理全部，`--force` 可重新维护，`--reindex` 可重建索引入口。它永不改写原文、`06 我的判断` 或 `07 练习与案例`。
 - `install_wiki_sync_launch_agent.sh`：预检同步、私有站点和 DeepSeek 钥匙串后，安装常驻采集桥与每 120 秒运行一次的收件箱同步 LaunchAgent。
-- `install_wiki_deepseek_maintainer_launch_agent.sh`：安装登录即运行、每天 09:10 运行一次的本机维护任务。它每次最多让 DeepSeek 处理 3 篇新原文；日志写到 `.logs/`，密钥始终只从钥匙串读取。
+- `install_wiki_deepseek_maintainer_launch_agent.sh`：安装登录即运行、每天 09:10 运行一次的本机维护任务。它每次让 DeepSeek 以 10 个知识单元为目标、最多处理 10 篇新原文；日志写到 `.logs/`，密钥始终只从钥匙串读取。
 
 ### DeepSeek 密钥
 

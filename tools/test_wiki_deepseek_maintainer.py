@@ -82,6 +82,15 @@ class WikiDeepSeekMaintainerTests(unittest.TestCase):
         self.assertEqual(content.count(MODULE.INDEX_START), 1)
         self.assertIn("第二次", content)
 
+    def test_candidate_pages_keep_the_prompt_budget_bounded(self):
+        root = self.make_root()
+        for index in range(20):
+            page = root / f"wiki/03 主题与主张/主题-{index}.md"
+            page.write_text("内容" * 4000, encoding="utf-8")
+        pages = MODULE.candidate_pages(root)
+        self.assertLessEqual(len(pages), MODULE.MAX_EXISTING_PAGES)
+        self.assertTrue(all(len(page["content"]) <= MODULE.MAX_EXISTING_PAGE_CHARS for page in pages))
+
     def test_every_processed_source_gets_a_digest_page(self):
         root = self.make_root()
         source = root / "wiki/01 原始材料/文章.md"
@@ -168,6 +177,82 @@ class WikiDeepSeekMaintainerTests(unittest.TestCase):
             MODULE.post_json = original_post
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(plan["units"]), 3)
+
+    def test_maintain_targets_ten_units_and_records_real_api_usage(self):
+        root = self.make_root()
+        for index in range(5):
+            source = root / f"wiki/01 原始材料/文章-{index}.md"
+            source.write_text(
+                f'---\nsource: "https://example.com/{index}"\n---\n\n## 原文\n\n' + "正文" * 500,
+                encoding="utf-8",
+            )
+        base = {
+            "hook": "入口", "explanation": "解释", "topic": "主题", "subtopics": ["边界"],
+            "format": "方法", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "对照",
+            "boundary": "边界", "whyItMatters": "重要", "sourceEvidence": "原文段落",
+        }
+        original_plan = MODULE.maintenance_plan
+        try:
+            def fake_plan(_root, source, _content, _key, model):
+                return {
+                    "sourceSummary": f"{source.stem} 的摘要",
+                    "keyPoints": ["关键点"],
+                    "relation": "补充现有理解。",
+                    "relatedQuestionIds": [],
+                    "understandingQuestion": "这会改变什么判断？",
+                    "units": [dict(base, title=f"{source.stem} 知识点 {unit}") for unit in range(4)],
+                    "updates": [],
+                    "_deepseek_api": {
+                        "provider": "DeepSeek API", "model": model, "api_calls": 1,
+                        "prompt_tokens": 80, "completion_tokens": 20, "total_tokens": 100,
+                    },
+                }
+            MODULE.maintenance_plan = fake_plan
+            processed, pending = MODULE.maintain(
+                root, "key", "deepseek-test", limit=10, target_units=10,
+            )
+        finally:
+            MODULE.maintenance_plan = original_plan
+
+        self.assertEqual(processed, 3)
+        self.assertEqual(pending, 5)
+        state = MODULE.read_state(root)
+        self.assertEqual(state["last_run"]["knowledge_units"], 12)
+        self.assertEqual(state["last_run"]["unit_shortfall"], 0)
+        self.assertEqual(state["last_run"]["api_calls"], 3)
+        self.assertEqual(state["last_run"]["total_tokens"], 300)
+        self.assertTrue(all(item["provider"] == "DeepSeek API" for item in state["sources"].values()))
+
+    def test_one_deepseek_failure_does_not_abort_the_daily_batch(self):
+        root = self.make_root()
+        for index in range(2):
+            source = root / f"wiki/01 原始材料/文章-{index}.md"
+            source.write_text(
+                f'---\nsource: "https://example.com/{index}"\n---\n\n## 原文\n\n' + "正文" * 500,
+                encoding="utf-8",
+            )
+        base = {
+            "hook": "入口", "explanation": "解释", "topic": "主题", "subtopics": [],
+            "format": "方法", "difficulty": "中等", "novelty": 0.5, "reasoningMove": "对照",
+            "boundary": "边界", "whyItMatters": "重要", "sourceEvidence": "原文段落",
+        }
+        original_plan = MODULE.maintenance_plan
+        try:
+            def fake_plan(_root, source, _content, _key, model):
+                if source.stem == "文章-0":
+                    raise RuntimeError("temporary DeepSeek error")
+                return {
+                    "sourceSummary": "摘要", "units": [dict(base, title=f"知识点 {unit}") for unit in range(3)],
+                    "updates": [], "_deepseek_api": {"provider": "DeepSeek API", "model": model, "api_calls": 1},
+                }
+            MODULE.maintenance_plan = fake_plan
+            processed, _ = MODULE.maintain(root, "key", "deepseek-test", limit=10, target_units=10)
+        finally:
+            MODULE.maintenance_plan = original_plan
+        state = MODULE.read_state(root)
+        self.assertEqual(processed, 1)
+        self.assertEqual(state["last_run"]["unit_shortfall"], 7)
+        self.assertEqual(len(state["last_run"]["failures"]), 1)
 
     def test_json_parser_accepts_deepseek_code_fence(self):
         parsed = MODULE.parse_json_object('```json\n{"units": []}\n```', "bad json")

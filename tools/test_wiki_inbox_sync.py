@@ -64,6 +64,31 @@ class WikiInboxSyncTests(unittest.TestCase):
         self.assertEqual(first["localPath"], second["localPath"])
         self.assertEqual(second["alreadyPresent"], "yes")
 
+    def test_aihot_lead_does_not_count_as_captured_source(self):
+        root = self.make_root()
+        lead = root / "wiki/01 原始材料/AI HOT 线索/lead.md"
+        lead.parent.mkdir(parents=True)
+        lead.write_text("# Lead\n\n状态：lead；原文待核验\n\n来源：https://mp.weixin.qq.com/s/example\n", encoding="utf-8")
+        self.assertIsNone(MODULE.existing_source(root, "https://mp.weixin.qq.com/s/example", include_pending=False))
+
+    def test_local_aihot_queue_is_consumed_and_status_is_updated(self):
+        root = self.make_root()
+        queue_path = root / MODULE.LOCAL_DISCOVERY_QUEUE
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        queue_path.write_text(json.dumps({"version": 1, "items": [{
+            "id": "aihot-one", "sourceUrl": "https://mp.weixin.qq.com/s/example",
+            "sourceTitle": "文章", "publisher": "数字生命卡兹克", "processingStatus": "queued",
+        }]}), encoding="utf-8")
+        items = MODULE.local_discovery_items(root)
+        self.assertEqual(items[0].publisher, "数字生命卡兹克")
+        MODULE.update_local_discovery_queue(root, [{
+            "sourceUrl": items[0].source_url, "processingStatus": "mirrored",
+            "processingError": "", "localPath": "wiki/01 原始材料/公众号/文章.md",
+        }])
+        updated = json.loads(queue_path.read_text(encoding="utf-8"))["items"][0]
+        self.assertEqual(updated["processingStatus"], "mirrored")
+        self.assertEqual(MODULE.local_discovery_items(root), [])
+
     def test_same_titled_restricted_links_keep_separate_clipping_tasks(self):
         root = self.make_root()
         first = MODULE.process_item(root, MODULE.InboxItem("task-4", "", "https://mp.weixin.qq.com/s/first", "mp.weixin.qq.com"))

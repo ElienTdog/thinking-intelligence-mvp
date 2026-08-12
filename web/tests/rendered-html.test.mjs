@@ -92,6 +92,23 @@ test("prioritizes followed creators while preserving feedback-driven ranking", (
   assert.equal(rankKnowledgeCards(cards, [{ cardId: "khazix", eventType: "less_like" }])[0].id, "generic");
 });
 
+test("keeps the knowledge feed continuous after the current inventory is exhausted", async () => {
+  const [route, dashboard, feed, css] = await Promise.all([
+    readFile(new URL("../app/api/feed/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(route, /size: MAX_CANDIDATES/);
+  assert.match(route, /`\$\{round \+ 1\}:0`/);
+  assert.doesNotMatch(route, /SHADOW_SIZE/);
+  assert.match(dashboard, /\.\.\.next\.cards/);
+  assert.match(feed, /IntersectionObserver/);
+  assert.match(feed, /feed-loader/);
+  assert.doesNotMatch(feed, /刷到底了/);
+  assert.match(css, /\.feed-loader/);
+});
+
 test("makes missing followed-creator material visible instead of disguising it as a generic recommendation", async () => {
   const [feed, css] = await Promise.all([
     readFile(new URL("../app/knowledge-feed.tsx", import.meta.url), "utf8"),

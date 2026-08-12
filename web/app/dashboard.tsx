@@ -62,6 +62,7 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   const [wikiLint, setWikiLint] = useState<WikiLint | null>(null);
   const [wikiQueryResult, setWikiQueryResult] = useState<WikiPage | null>(null);
   const captureFromLinkStarted = useRef(false);
+  const feedRequestRunning = useRef(false);
   const touchStart = useRef<{ x: number; y: number; at: number } | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
   const [isDraggingSurface, setIsDraggingSurface] = useState(false);
@@ -131,14 +132,16 @@ export function JudgmentWorkbench({ displayName }: { displayName: string }) {
   }, []);
 
   const loadMoreFeed = useCallback(() => {
-    if (!nextFeedCursor) return;
+    if (!nextFeedCursor || feedRequestRunning.current) return;
+    feedRequestRunning.current = true;
     void requestJson(`/api/feed?limit=8&cursor=${encodeURIComponent(nextFeedCursor)}`)
       .then((payload) => {
         const next = payload as FeedPayload;
-        setFeedCards((current) => [...current, ...next.cards.filter((card) => !current.some((item) => item.id === card.id))]);
+        setFeedCards((current) => [...current, ...next.cards]);
         setNextFeedCursor(next.nextCursor);
       })
-      .catch((error) => setNotice(error instanceof Error ? error.message : "无法加载更多知识卡"));
+      .catch((error) => setNotice(error instanceof Error ? error.message : "无法加载更多知识卡"))
+      .finally(() => { feedRequestRunning.current = false; });
   }, [nextFeedCursor]);
 
   const generateToday = useCallback(() => {

@@ -8,7 +8,15 @@ import { requireApiUser } from "../auth";
 
 const MAX_PAGE_SIZE = 12;
 const MAX_CANDIDATES = 120;
-const SHADOW_SIZE = 20;
+
+function feedPosition(value: string | null) {
+  const [roundValue, cursorValue] = String(value || "0:0").split(":", 2);
+  if (cursorValue === undefined) return { round: 0, cursor: Math.max(0, Number(roundValue) || 0) };
+  return {
+    round: Math.max(0, Number(roundValue) || 0),
+    cursor: Math.max(0, Number(cursorValue) || 0),
+  };
+}
 
 function recommenderMode(preview: string | null) {
   if (preview === "bandit") return "BANDIT";
@@ -22,7 +30,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(url.searchParams.get("limit")) || 8));
-  const cursor = Math.max(0, Number(url.searchParams.get("cursor")) || 0);
+  const { round, cursor } = feedPosition(url.searchParams.get("cursor"));
   const db = getDb();
   const [cards, events, model] = await Promise.all([
     db.select().from(knowledgeCards)
@@ -32,12 +40,16 @@ export async function GET(request: Request) {
     db.select().from(recommendationModels).where(eq(recommendationModels.ownerId, auth.user.userId)).limit(1),
   ]);
   const legacy = rankKnowledgeCards(cards, events);
-  const seed = `${auth.user.userId}:${new Date().toISOString().slice(0, 10)}`;
-  const bandit = recommendTopicSlate(cards, model[0]?.modelJson || "", { size: SHADOW_SIZE, seed, events });
+  const seed = `${auth.user.userId}:${new Date().toISOString().slice(0, 10)}:${round}`;
+  const bandit = recommendTopicSlate(cards, model[0]?.modelJson || "", { size: MAX_CANDIDATES, seed, events });
   const mode = recommenderMode(url.searchParams.get("preview"));
   const ranked = mode === "BANDIT" ? bandit.items.map((item) => item.card) : legacy;
   const page = ranked.slice(cursor, cursor + limit);
-  const nextCursor = cursor + page.length < ranked.length ? String(cursor + page.length) : null;
+  const nextCursor = !ranked.length
+    ? null
+    : cursor + page.length < ranked.length
+      ? `${round}:${cursor + page.length}`
+      : `${round + 1}:0`;
   const sessionId = crypto.randomUUID();
   const reasons = new Map(bandit.items.map((item) => [item.card.id, item.reason]));
 

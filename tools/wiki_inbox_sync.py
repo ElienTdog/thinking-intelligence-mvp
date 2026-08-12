@@ -37,6 +37,7 @@ USER_AGENT = "thinking-wiki-local-sync/0.1"
 RESTRICTED_HOSTS = {"mp.weixin.qq.com", "xiaohongshu.com", "www.xiaohongshu.com"}
 DEFAULT_CREATORS = ["数字生命卡兹克", "赛博禅心", "量子位", "Datawhale", "MacTalk"]
 MAX_COVER_BYTES = 500_000
+LOCAL_DISCOVERY_QUEUE = Path("wiki/00 系统/aihot-discovery-inbox.json")
 
 
 @dataclass
@@ -154,6 +155,8 @@ def existing_source(root: Path, url: str, include_pending: bool = True) -> Path 
         return None
     marker = f"来源：{url}"
     for path in (root / "wiki" / "01 原始材料").rglob("*.md"):
+        if "AI HOT 线索" in path.parts:
+            continue
         if not include_pending and "待剪藏" in path.parts:
             continue
         if marker in path.read_text(encoding="utf-8"):
@@ -284,7 +287,7 @@ def capture_from_bridge(item: InboxItem, bridge_url: str, bridge_token: str, tim
             "itemId": item.item_id,
             "sourceUrl": item.source_url,
             "sourceTitle": item.source_title,
-            "retry": item.processing_status == "queued",
+            "retry": item.processing_status in {"queued", "needs_user_open", "failed"},
         },
     )
     job = queued.get("job", {}) if isinstance(queued, dict) else {}
@@ -695,6 +698,59 @@ def creator_sources(root: Path) -> list[dict[str, str]]:
     return [source for source in sources if isinstance(source, dict) and source.get("name") and source.get("rss_url")]
 
 
+def local_discovery_items(root: Path) -> list[InboxItem]:
+    path = root / LOCAL_DISCOVERY_QUEUE
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    entries = payload.get("items", []) if isinstance(payload, dict) else []
+    return [
+        InboxItem(
+            str(entry.get("id", "")),
+            "",
+            str(entry.get("sourceUrl", "")),
+            str(entry.get("sourceTitle", "")),
+            str(entry.get("publisher", "")),
+            str(entry.get("publishedAt", "")),
+            str(entry.get("processingStatus", "queued")),
+        )
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("sourceUrl")
+        and entry.get("processingStatus", "queued") in {"queued", "loading"}
+    ]
+
+
+def update_local_discovery_queue(root: Path, records: list[dict[str, str]]) -> None:
+    path = root / LOCAL_DISCOVERY_QUEUE
+    if not path.exists() or not records:
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    entries = payload.get("items", []) if isinstance(payload, dict) else []
+    by_url = {record.get("sourceUrl", ""): record for record in records if record.get("sourceUrl")}
+    changed = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        record = by_url.get(str(entry.get("sourceUrl", "")))
+        if not record:
+            continue
+        entry["processingStatus"] = record.get("processingStatus", "failed")
+        entry["processingError"] = record.get("processingError", "")
+        entry["localPath"] = record.get("localPath", "")
+        changed = True
+    if changed:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+
 def rss_items(url: str, creator: str) -> list[InboxItem]:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/rss+xml,application/atom+xml,text/xml"})
     with urlopen(request, timeout=30) as response:
@@ -733,6 +789,11 @@ def run(
             ))
 
     discovered: list[tuple[InboxItem, str]] = [(item, "") for item in remote_items]
+    known_urls = {item.source_url for item in remote_items if item.source_url}
+    for item in local_discovery_items(root):
+        if item.source_url not in known_urls:
+            discovered.append((item, item.publisher))
+            known_urls.add(item.source_url)
     for source in creator_sources(root):
         try:
             discovered.extend((item, str(source["name"])) for item in rss_items(str(source["rss_url"]), str(source["name"])))
@@ -759,15 +820,29 @@ def run(
 
     if records and not dry_run:
         append_log(root, records)
+        update_local_discovery_queue(root, records)
     if records and server and token and not dry_run:
-        from wiki_deepseek_maintainer import DEFAULT_MODEL, load_api_key, maintain
+        from wiki_deepseek_maintainer import DEFAULT_MODEL, DEFAULT_SOURCE_LIMIT, DEFAULT_UNIT_TARGET, load_api_key, maintain
 
         def mirror(items: list[dict[str, str]]) -> None:
             request_json(f"{server.rstrip('/')}/api/local-sync/mirror", token, {"items": items}, site_bypass_token)
 
         def maintain_wiki() -> None:
-            processed, _ = maintain(root, load_api_key(), DEFAULT_MODEL)
-            print(f"DeepSeek Wiki maintenance: processed={processed}")
+            processed, _ = maintain(
+                root,
+                load_api_key(),
+                DEFAULT_MODEL,
+                limit=DEFAULT_SOURCE_LIMIT,
+                target_units=DEFAULT_UNIT_TARGET,
+            )
+            state = json.loads((root / "wiki/00 系统/deepseek-maintenance-state.json").read_text(encoding="utf-8"))
+            run = state.get("last_run", {})
+            print(
+                f"DeepSeek Wiki maintenance: processed={processed} "
+                f"knowledge_units={run.get('knowledge_units', 0)} "
+                f"unit_shortfall={run.get('unit_shortfall', DEFAULT_UNIT_TARGET)} "
+                f"api_calls={run.get('api_calls', 0)} total_tokens={run.get('total_tokens', 0)}"
+            )
 
         def mirror_knowledge() -> set[str]:
             paths = sync_maintained_knowledge(root, server, token, site_bypass_token)
@@ -775,6 +850,8 @@ def run(
             return paths
 
         finalize_records(root, records, mirror, maintain_wiki, mirror_knowledge)
+    if records and not dry_run:
+        update_local_discovery_queue(root, records)
     return len(discovered), len(records)
 
 

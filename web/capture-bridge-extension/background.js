@@ -44,6 +44,48 @@ async function finish(job, payload) {
   await bridge(`/v1/extension/jobs/${job.jobId}/result`, { method: "POST", body: JSON.stringify({ ...payload, sourceUrl: job.sourceUrl, images }) });
 }
 
+function extractVisibleWechatArticle() {
+  const read = (selector) => document.querySelector(selector)?.textContent?.trim() || "";
+  const article = document.querySelector("#js_content");
+  const markdown = article?.innerText?.trim() || "";
+  const imageUrls = article ? Array.from(article.querySelectorAll("img"))
+    .map((image) => image.getAttribute("data-src") || image.getAttribute("src") || "")
+    .filter((value, index, all) => /^(https:\/\/|data:image\/)/.test(value) && all.indexOf(value) === index)
+    .slice(0, 8) : [];
+  if (!article || markdown.length < 400) {
+    return {
+      status: "needs_user_open",
+      sourceUrl: location.href,
+      error: "页面未出现可读正文，可能需要登录、验证或在当前浏览器中手动打开",
+      evidence: document.title,
+    };
+  }
+  return {
+    status: "captured",
+    sourceUrl: location.href,
+    title: read("#activity-name") || document.title,
+    author: read("#js_name"),
+    publishedAt: read("#publish_time"),
+    markdown,
+    html: article.innerHTML,
+    imageUrls,
+    evidence: "由已授权浏览器中的 #js_content 提取",
+  };
+}
+
+async function extractFromTab(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: "extract-wechat-article" });
+  } catch {
+    const [injected] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractVisibleWechatArticle,
+    });
+    if (!injected?.result) throw new Error("扩展未能在微信页面读取正文");
+    return injected.result;
+  }
+}
+
 async function poll() {
   try {
     const { job } = await bridge("/v1/extension/jobs/next");
@@ -55,7 +97,7 @@ async function poll() {
       chrome.tabs.onUpdated.removeListener(listener);
       try {
         await new Promise((resolve) => setTimeout(resolve, 1200));
-        const payload = await chrome.tabs.sendMessage(tabId, { type: "extract-wechat-article" });
+        const payload = await extractFromTab(tabId);
         await finish(job, payload);
       } catch (error) {
         await finish(job, { status: "needs_user_open", sourceUrl: job.sourceUrl, error: String(error), evidence: "扩展未能读取文章正文" });

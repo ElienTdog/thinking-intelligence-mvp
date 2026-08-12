@@ -47,6 +47,7 @@ export function KnowledgeFeed({
   const followedCards = visibleCards.filter(isFollowedCreator);
   const [selected, setSelected] = useState<KnowledgeCard | null>(null);
   const seenCardId = useRef("");
+  const loadMoreTrigger = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const first = visibleCards[0];
@@ -54,6 +55,16 @@ export function KnowledgeFeed({
     seenCardId.current = first.id;
     onEvent(first.id, "seen");
   }, [active, onEvent, visibleCards]);
+
+  useEffect(() => {
+    const trigger = loadMoreTrigger.current;
+    if (!active || mode !== "feed" || !hasMore || !trigger) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+    }, { rootMargin: "100% 0px" });
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [active, hasMore, mode, onLoadMore]);
 
   if (!visibleCards.length) {
     return <section className="feed-empty" aria-label={mode === "story" ? "今日故事" : "推荐知识流"}>
@@ -69,7 +80,7 @@ export function KnowledgeFeed({
       {mode === "feed" && !followedCards.length && <FollowedCreatorEmpty onOpenSources={onOpenSources} />}
       {mode === "story" && story && <StoryOpening story={story} />}
       {visibleCards.map((card, index) => <KnowledgeCardView
-        key={card.id}
+        key={`${card.id}:${index}`}
         card={card}
         chapter={mode === "story" ? index + 1 : 0}
         index={index}
@@ -80,9 +91,7 @@ export function KnowledgeFeed({
           onEvent(card.id, "completed");
         }}
       />)}
-      {mode === "feed" && (hasMore
-        ? <button className="load-more" onClick={onLoadMore}>继续加载</button>
-        : <p className="feed-end">刷到底了</p>)}
+      {mode === "feed" && hasMore && <div className="feed-loader" ref={loadMoreTrigger} aria-label="正在续上更多知识"><span /></div>}
       {mode === "story" && story && <footer className="story-takeaway"><p>今天带走</p><strong>{story.takeaway}</strong></footer>}
     </div>
     {selected && <KnowledgeDetail
